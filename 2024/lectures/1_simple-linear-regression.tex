@@ -1,7 +1,3 @@
-%
-% WSABI Sports Research Lab Lecture Notes Template
-% This template is designed for creating lecture notes for the WSABI Sports Research Lab
-%
 \documentclass[twoside]{article}
 \setlength{\oddsidemargin}{0 in}
 \setlength{\evensidemargin}{0 in}
@@ -84,10 +80,8 @@ Figure \thelecnum.#1:~#3
 
 \begin{document}
 
-% Example usage of the lecture command
 \lecture{1}{Simple Linear Regression}{WSABI Summer Research Lab}{Summer 2024}{Ryan Brill}{Jonathan Pipping}
 
-% Example section - Section 1
 \section{Motivating Example: MLB Batting Averages}
 Suppose we have access to each MLB player's 2020 and 2021 batting averages and no other information. How would we predict a player's 2021 batting average from their 2020 one?
 
@@ -263,7 +257,7 @@ In Figure \ref{fig:ipba-scatter} below, we plot the MLB season averages for in-p
 In Figure \ref{fig:ipba-split}, you can see that the data is much more tightly clustered in an elliptical shape when it is separated. Generally, this shape indicates the best type of data for prediction.
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.6\textwidth]{figures/1_ipba-split.png}
+    \includegraphics[width=0.8\textwidth]{figures/1_ipba-split.png}
     \caption{The correlation is much higher when the data is split}
     \label{fig:ipba-split}
 \end{figure}
