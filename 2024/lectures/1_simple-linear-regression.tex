@@ -1,0 +1,302 @@
+%
+% WSABI Sports Research Lab Lecture Notes Template
+% This template is designed for creating lecture notes for the WSABI Sports Research Lab
+%
+\documentclass[twoside]{article}
+\setlength{\oddsidemargin}{0 in}
+\setlength{\evensidemargin}{0 in}
+\setlength{\topmargin}{-0.6 in}
+\setlength{\textwidth}{6.5 in}
+\setlength{\textheight}{8.5 in}
+\setlength{\headsep}{0.75 in}
+\setlength{\parindent}{0 in}
+\setlength{\parskip}{0.1 in}
+
+% Essential packages
+\usepackage{amsmath,amsfonts,amsthm,graphicx,bm,bbm}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{float}
+\usepackage{footmisc}
+\renewcommand{\thefootnote}{\alph{footnote}}
+
+% Counter setup for lecture numbering
+\newcounter{lecnum}
+\renewcommand{\thepage}{\thelecnum-\arabic{page}}
+\renewcommand{\thesection}{\thelecnum.\arabic{section}}
+\renewcommand{\theequation}{\thelecnum.\arabic{equation}}
+\renewcommand{\thefigure}{\thelecnum.\arabic{figure}}
+\renewcommand{\thetable}{\thelecnum.\arabic{table}}
+
+% Lecture header command
+\newcommand{\lecture}[6]{
+   \pagestyle{myheadings}
+   \thispagestyle{plain}
+   \newpage
+   \setcounter{lecnum}{#1}
+   \setcounter{page}{1}
+   \noindent
+   \begin{center}
+   \framebox{
+      \vbox{\vspace{2mm}
+    \hbox to 6.28in { {\bf #3 \hfill #4} }
+       \vspace{4mm}
+       \hbox to 6.28in { {\Large \hfill Lecture #1: #2  \hfill} }
+       \vspace{2mm}
+       \hbox to 6.28in { {\it Instructor: #5 \hfill Scribe: #6} }
+      \vspace{2mm}}
+   }
+   \end{center}
+   \markboth{Lecture #1: #2}{Lecture #1: #2}
+}
+
+% Citation and reference commands
+\renewcommand{\cite}[1]{[#1]}
+\def\beginrefs{\begin{list}%
+        {[\arabic{equation}]}{\usecounter{equation}
+         \setlength{\leftmargin}{2.0truecm}\setlength{\labelsep}{0.4truecm}%
+         \setlength{\labelwidth}{1.6truecm}}}
+\def\endrefs{\end{list}}
+\def\bibentry#1{\item[\hbox{[#1]}]}
+
+% Figure command
+\newcommand{\fig}[3]{
+\vspace{#2}
+\begin{center}
+Figure \thelecnum.#1:~#3
+\end{center}
+}
+
+% Theorem environments
+\newtheorem{theorem}{Theorem}[lecnum]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{claim}[theorem]{Claim}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{definition}[theorem]{Definition}
+\theoremstyle{definition}
+\newtheorem{example}[theorem]{Example}{\normalfont}
+
+% Common math symbols
+\renewcommand{\P}{\mathbb{P}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\R}{\mathbb{R}}
+
+\begin{document}
+
+% Example usage of the lecture command
+\lecture{1}{Simple Linear Regression}{WSABI Summer Research Lab}{Summer 2024}{Ryan Brill}{Jonathan Pipping}
+
+% Example section - Section 1
+\section{Motivating Example: MLB Batting Averages}
+Suppose we have access to each MLB player's 2020 and 2021 batting averages and no other information. How would we predict a player's 2021 batting average from their 2020 one?
+
+Generally, a good idea is to start with exploratory data analysis. Let's plot the data and see what we learn.
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/1_ba-dot.png}
+    \caption{Batting Averages for MLB Players in 2020 and 2021}
+    \label{fig:ba-dot}
+\end{figure}
+
+What does the relationship look like?
+\begin{itemize}
+    \item[-] Somewhat linear with a positive slope
+    \item[-] Positive relationship: you'd expect that a higher 2020 BA is associated with a higher 2021 BA
+    \item[-] You might imagine drawing a best fit line through the points
+\end{itemize}
+Let's plot that line of best fit!
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/1_ba-line.png}
+    \caption{Line of Best Fit for MLB Batting Averages}
+    \label{fig:ba-line}
+\end{figure}
+This relationship isn't perfect, there's certainly some correlation but a lot of noise in the data. Still the question remains: how did we get this line? We \textbf{set up a model} to define this mathematically.
+
+\section{Setting Up the Model}\label{sec:model}
+
+Index each baseball player by $i = 1, \ldots, n$. Let $X_i = BA_{i}^{(2020)}$ be our independent (predictor) variable and $Y_i = BA_{i}^{(2021)}$ be our dependent (response) variable. Assuming a \textbf{linear relationship} between each $X_i$ and its corresponding $Y_i$, we can write:
+\begin{equation}
+    Y_i = \beta_0 + \beta_1 X_i + \epsilon_i
+\end{equation}
+where $\beta_0$ is an unknown constant intercept, $\beta_1$ is an unknown constant slope, and $\epsilon_i$ is a random, independent, and identically-distributed error (or noise) term with mean $0$ and constant variance $\sigma^2$. Mathematically, we can write
+\begin{equation}
+    \epsilon_i \text{ i.i.d.}, \quad \mathbb{E}[\epsilon_i] = 0, \quad \text{and} \quad \mathbb{E}[\epsilon_i^2] = \sigma^2
+\end{equation}
+We are interested in the conditional expectation of $Y_i$ given $X_i$, or
+\begin{equation}
+    \mathbb{E}[Y_i \mid X_i] = \beta_0 + \beta_1 X_i
+\end{equation}
+This represents the "true" underlying line, but we don't know the values of $\beta_0$ and $\beta_1$. How do we \textbf{obtain estimates for these parameters} to obtain the "best fit" line?
+
+\section{Estimating Model Parameters}
+
+\begin{definition}[Ordinary Least Squares]
+Find the values $\widehat{\beta}_0$ and $\widehat{\beta}_1$ that minimize the \textbf{Residual Sum of Squares (RSS)}, or the mean squared error.
+\end{definition}
+\begin{definition}[Residual Sum of Squares]
+\begin{align}
+    \text{RSS} &= \sum_{i=1}^n (Y_i - \mathbb{E}[Y_i \mid X_i])^2 \nonumber \\
+    &= \sum_{i=1}^n (Y_i - (\beta_0 + \beta_1 X_i))^2
+\end{align}
+\end{definition}
+Visually, we can think of the RSS as the sum of the squared vertical distances between the observed points and the fitted line (or the squared residuals). In Figure \ref{fig:ba-rss}, we plot the residuals for each point. 
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/1_ba-rss.png}
+    \caption{Residuals for MLB Batting Averages}
+    \label{fig:ba-rss}
+\end{figure}
+
+Our objective is to find the intercept ($\beta_0$) and slope ($\beta_1$) which minimize the sum of squares of the lengths of the pink line segments. Mathematically, we write:
+\begin{align}
+    \widehat{\beta}_0, \widehat{\beta}_1 &= \arg\min_{(\beta_0, \beta_1)} \text{RSS}(\beta_0, \beta_1) \nonumber \\
+    &= \arg\min_{(\beta_0, \beta_1)} \sum_{i=1}^n (Y_i - (\beta_0 + \beta_1 X_i))^2
+\end{align}
+We can solve this with calculus, setting the partial derivatives with respect to $\beta_0$ and $\beta_1$ to zero.
+\begin{align}
+    \frac{\partial}{\partial \beta_0} \text{RSS}(\beta_0, \beta_1) &= \sum_{i=1}^n -2(Y_i - (\beta_0 + \beta_1 X_i)) = 0 \nonumber \\
+    \implies \frac{1}{n} \sum_{i=1}^n \beta_0 &= \frac{1}{n} \sum_{i=1}^n (Y_i - \beta_1 X_i) \nonumber \\
+    \implies \widehat{\beta}_0 &= \bar{Y} - \widehat{\beta}_1 \bar{X}\label{eq:beta0}\footnotemark
+\end{align}
+\footnotetext{$\bar{X} = \frac{1}{n}\sum_{i=1}^n X_i$ and $\bar{Y} = \frac{1}{n}\sum_{i=1}^n Y_i$ are the sample means of the predictor and response variables, respectively.}
+\begin{align}
+    \frac{\partial}{\partial \beta_1} \text{RSS}(\beta_0, \beta_1) &= \sum_{i=1}^n -2X_i(Y_i - (\beta_0 + \beta_1 X_i)) = 0 \nonumber \\
+    \implies& -\frac{1}{n}\sum_{i=1}^n X_i Y_i + \beta_0 \frac{1}{n} \sum_{i=1}^n X_i\footnotemark + \beta_1 \frac{1}{n} \sum_{i=1}^n X_i^2 = 0 \nonumber \\
+    \implies& \beta_1\left(\frac{1}{n} \sum_{i=1}^n X_i^2 - \bar{X}\right)^2 = \frac{1}{n} \sum_{i=1}^n X_i Y_i - \bar X \bar Y\nonumber \\
+    \implies& \widehat \beta_1 = \frac{\sum_{i=1}^n (X_i - \bar{X})(Y_i - \bar{Y})}{\sum_{i=1}^n (X_i - \bar{X})^2}\label{eq:beta1}
+\end{align}
+\footnotetext{$\beta_0 \frac{1}{n} \sum_{i=1}^n X_i = \beta_0\bar{X} = (\bar{Y} - \widehat{\beta}_1 \bar{X})\bar{X} = \bar{X}\bar{Y} - \beta_1 \bar{X}^2$, from Equation \ref{eq:beta0}}
+So we have closed-form expressions for $\widehat{\beta}_0$ and $\widehat{\beta}_1$. But what do these coefficients mean?
+
+\section{Interpreting Model Coefficients}
+
+\subsection{Covariance}
+
+\begin{definition}[Covariance]
+    The covariance between two random variables $X$ and $Y$ is defined as
+    \begin{equation}
+        \sigma_{XY} = \text{Cov}(X, Y) = \mathbb{E}[(X - \mathbb{E}[X])(Y - \mathbb{E}[Y])]
+    \end{equation}
+    Note that if $\mathbb{E}[X] = \mathbb{E}[Y] = 0$, then $\sigma_{XY} = \mathbb{E}[XY]$.
+\end{definition}
+\begin{itemize}
+    \item[-] Positive covariance: If when $X$ is positive, $Y$ tends to be positive (and when $X$ is negative, $Y$ tends to be negative), then $\sigma_{XY} > 0$
+    \item[-] Negative covariance: If when $X$ is positive, $Y$ tends to be negative (and when $X$ is negative, $Y$ tends to be positive), then $\sigma_{XY} < 0$
+\end{itemize}
+We proceed with some theorems that you will prove in your homework.
+\begin{theorem}
+    If $X$ and $Y$ are independent, then $\sigma_{XY} = 0$.
+\end{theorem}
+\begin{theorem}
+    The \textbf{sample covariance} between $X$ and $Y$, defined as
+    \begin{equation}
+        S_{XY} = \frac{1}{n-1} \sum_{i=1}^n (X_i - \bar{X})(Y_i - \bar{Y})
+    \end{equation}
+    is an unbiased estimator of $\sigma_{XY}$.
+\end{theorem}
+\begin{theorem}
+    The \textbf{sample variance} of $X$, defined as 
+    \begin{equation}
+        S_X^2 = \frac{1}{n-1} \sum_{i=1}^n (X_i - \bar{X})^2
+    \end{equation}
+    is an unbiased estimator of $\sigma_X^2 = \text{Var}(X)$.
+\end{theorem}
+
+\subsection{Correlation}
+
+\begin{definition}[Correlation]
+    The correlation between two random variables $X$ and $Y$ is defined as
+    \begin{equation}
+        \rho_{XY} = \frac{\sigma_{XY}}{\sigma_X \sigma_Y}
+    \end{equation}
+    It is a normalized version of the covariance, and is always between $-1$ and $1$.
+\end{definition}
+\begin{definition}[Sample Correlation]
+    The sample correlation between $X$ and $Y$ is defined as
+    \begin{equation}
+        r_{XY} = \frac{S_{XY}}{S_X S_Y} = \frac{\sum_{i=1}^n (X_i - \bar{X})(Y_i - \bar{Y})}{\sqrt{\sum_{i=1}^n (X_i - \bar{X})^2} \sqrt{\sum_{i=1}^n (Y_i - \bar{Y})^2}}
+    \end{equation}
+\end{definition}
+We can use the sample correlation to measure the strength of the linear relationship between $X$ and $Y$. Consider our estimate $\widehat{\beta}_1$ from Equation \ref{eq:beta1}:
+\begin{align}
+    \widehat{\beta}_1 &= \frac{\sum_{i=1}^n (X_i - \bar{X})(Y_i - \bar{Y})}{\sum_{i=1}^n (X_i - \bar{X})^2} \nonumber \\
+    &= \frac{\sum_{i=1}^n (X_i - \bar{X})(Y_i - \bar{Y})}{\sqrt{\sum_{i=1}^n (X_i - \bar{X})^2} \sqrt{\sum_{i=1}^n (Y_i - \bar{Y})^2}} \cdot \frac{\sqrt{\sum_{i=1}^n (Y_i - \bar{Y})^2}}{\sqrt{\sum_{i=1}^n (X_i - \bar{X})^2}} \nonumber \\
+    &= r_{XY} \cdot \frac{S_Y}{S_X}
+\end{align}
+We can also reciprocally express the sample correlation in terms of $\widehat{\beta}_1$:
+\begin{equation}
+    r_{XY} = \widehat{\beta}_1 \frac{S_X}{S_Y}
+\end{equation}
+So if $X$ and $Y$ have the same scale (or sample variance), then the sample correlation is simply the slope of the linear regression line!
+
+\section{Remarks on Correlation}
+
+\subsection{Correlation Can Be Misleading}
+
+Correlation is a measure of \textbf{linear association} between two variables. Figure \ref{fig:equal-corr} shows four plots with equal correlation, but they have \textbf{very} different relationships. What does this tell us?
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/1_equal-corr.png}
+    \caption{Four scatter plots with equal correlation}
+    \label{fig:equal-corr}
+\end{figure}
+
+Correlation can be \textbf{meaningless} if:
+\begin{itemize}
+    \item[-] The relationship is not linear at all
+    \item[-] There are extreme outliers in the data.
+\end{itemize}
+It is best to use correlation to describe data whose scatter plots are roughly elliptical (football-shaped). The lesson? \textbf{ALWAYS PLOT YOUR DATA!}
+
+\subsection{Case Study: In-Play Batting Average vs Batting Average}
+
+In Figure \ref{fig:ipba-scatter} below, we plot the MLB season averages for in-play batting average vs overall batting average for each season. It's clear when we plot the data that there is a different relationship between IPBA and BA before 1951 vs after 1951. We should consider splitting the data into two for our analysis.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/1_ipba-scatter.png}
+    \caption{The relationship between in-play batting average and overall batting average is clearly different before and after 1951}
+    \label{fig:ipba-scatter}
+\end{figure}
+
+In Figure \ref{fig:ipba-split}, you can see that the data is much more tightly clustered in an elliptical shape when it is separated. Generally, this shape indicates the best type of data for prediction.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/1_ipba-split.png}
+    \caption{The correlation is much higher when the data is split}
+    \label{fig:ipba-split}
+\end{figure}
+Notice that the correlation for either data (red or blue) is almost 3 times larger than the two together (0.97 and 0.91 vs 0.36).
+
+\section{Back to Our Batting Average Model}
+
+In Section \ref{sec:model}, we defined our model as 
+\begin{equation}
+    Y_i = \beta_0 + \beta_1 X_i + \epsilon_i
+\end{equation}
+where $Y_i$ is the dependent variable, $X_i$ is the independent variable, $\beta_0$ is the intercept, $\beta_1$ is the slope, and $\epsilon_i$ is the error term. Letting $X = BA^{(2020)}$ and $Y = BA^{(2021)}$, we now know that $\widehat{\beta}_1$ is a measure of how correlated $BA^{(2020)}$ is with $BA^{(2021)}$.
+
+We use \texttt{R} to fit our linear regression model.
+\begin{lstlisting}[language=R]
+    model = lm(BA_2021 ~ BA_2020, data = ba_data)
+    summary(model)
+\end{lstlisting}
+From this summary output, we can see that $\widehat{\beta}_1 = 0.25$. This means that a batting average increase of 0.020 in 2020 is associated with a predicted batting average increase of 0.005 in 2021.
+
+\section{Regression to the Mean}
+
+If $X_i > \bar{X}$, then $X_i = \bar{X} + \delta$, with $\delta > 0$. Then it follows that:
+\begin{align}
+    \widehat{Y}_i &= \widehat{\beta}_0 + \widehat{\beta}_1 X_i \nonumber \\
+    &= (\bar{Y} - \widehat{\beta}_1 \bar{X}) + \widehat{\beta}_1 X_i \nonumber \\
+    &= \bar{Y} + \widehat{\beta}_1 (X_i - \bar{X}) \nonumber \\
+    &= \bar{Y} + \widehat{\beta}_1 \delta \\
+\end{align}
+In our example, $\widehat{\beta}_1 = 0.25$, therefore
+\begin{equation}
+    \widehat{Y}_i = \bar{Y} + \frac{\delta}{4}
+\end{equation}
+This is an example of \textbf{regression to the mean}. $BA_i^{(2020)}$ is $\delta$ greater than $\bar{BA}^{(2020)}$, but $\widehat{BA}_i^{(2021)}$ is only $\frac{\delta}{4}$ greater than $\bar{BA}^{(2021)}$. In other words, our prediction of player $i$'s 2021 batting average is somewhere between their 2020 BA and the mean BA in 2021.
+
+\end{document}
