@@ -374,7 +374,7 @@ Now we fit the full 7-knot cubic spline on the NFL draft data. We use \texttt{R}
     # get coefficients
     full_coef = full_spline$coefficients
 \end{lstlisting}
-However, when we plot the model in Figure \ref{fig:draft-full-spline}, we notice that our model is a big wiggly at the end of the draft. This indicates that our model is overfitting the data (too many knots, not enough data). To fix this, we can reduce the number of knots to get a smoother fit.
+However, when we plot the model in Figure \ref{fig:draft-full-spline}, we notice that our curve is a big wiggly at the end of the draft. This indicates that our model is overfitting to the data (too many knots, not enough data). To fix this, we can reduce the number of knots to get a smoother fit.
 
 \begin{figure}[h]
     \centering
@@ -387,7 +387,7 @@ When fitting splines, the degrees of freedom is the number of parameters we need
 \begin{equation}
     \text{df} = \text{number of knots} + \text{degree of polynomial} + 1
 \end{equation}
-We can specify the degrees of freedom in \texttt{R} with the \texttt{df} argument, which along with the \texttt{degree} argument, specifies the number of knots. Let's try re-fitting the model with 5 degrees of freedom (3rd degree polynomial with 1 knot).
+We can specify the degrees of freedom in \texttt{R} with the \texttt{df} argument which, along with the \texttt{degree} argument, specifies the number of knots. Let's try re-fitting the model with 5 degrees of freedom (a 3rd degree polynomial with 1 knot).
 \begin{lstlisting}[language=R]
     # fit reduced spline with 5 df
     red_spline = lm(contract_value ~ splines::bs(draft_pos, degree = 3,
