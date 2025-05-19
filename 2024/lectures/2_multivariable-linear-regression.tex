@@ -1,0 +1,413 @@
+\documentclass[twoside]{article}
+\setlength{\oddsidemargin}{0 in}
+\setlength{\evensidemargin}{0 in}
+\setlength{\topmargin}{-0.6 in}
+\setlength{\textwidth}{6.5 in}
+\setlength{\textheight}{8.5 in}
+\setlength{\headsep}{0.75 in}
+\setlength{\parindent}{0 in}
+\setlength{\parskip}{0.1 in}
+
+% Essential packages
+\usepackage{amsmath,amsfonts,amsthm,graphicx,bm,bbm}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{float}
+\usepackage{footmisc}
+\renewcommand{\thefootnote}{\alph{footnote}}
+
+% Counter setup for lecture numbering
+\newcounter{lecnum}
+\renewcommand{\thepage}{\thelecnum-\arabic{page}}
+\renewcommand{\thesection}{\thelecnum.\arabic{section}}
+\renewcommand{\theequation}{\thelecnum.\arabic{equation}}
+\renewcommand{\thefigure}{\thelecnum.\arabic{figure}}
+\renewcommand{\thetable}{\thelecnum.\arabic{table}}
+
+% Lecture header command
+\newcommand{\lecture}[6]{
+   \pagestyle{myheadings}
+   \thispagestyle{plain}
+   \newpage
+   \setcounter{lecnum}{#1}
+   \setcounter{page}{1}
+   \noindent
+   \begin{center}
+   \framebox{
+      \vbox{\vspace{2mm}
+    \hbox to 6.28in { {\bf #3 \hfill #4} }
+       \vspace{4mm}
+       \hbox to 6.28in { {\Large \hfill Lecture #1: #2  \hfill} }
+       \vspace{2mm}
+       \hbox to 6.28in { {\it Instructor: #5 \hfill Scribe: #6} }
+      \vspace{2mm}}
+   }
+   \end{center}
+   \markboth{Lecture #1: #2}{Lecture #1: #2}
+}
+
+% Citation and reference commands
+\renewcommand{\cite}[1]{[#1]}
+\def\beginrefs{\begin{list}%
+        {[\arabic{equation}]}{\usecounter{equation}
+         \setlength{\leftmargin}{2.0truecm}\setlength{\labelsep}{0.4truecm}%
+         \setlength{\labelwidth}{1.6truecm}}}
+\def\endrefs{\end{list}}
+\def\bibentry#1{\item[\hbox{[#1]}]}
+
+% Figure command
+\newcommand{\fig}[3]{
+\vspace{#2}
+\begin{center}
+Figure \thelecnum.#1:~#3
+\end{center}
+}
+
+% Theorem environments
+\newtheorem{theorem}{Theorem}[lecnum]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{claim}[theorem]{Claim}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{definition}[theorem]{Definition}
+\theoremstyle{definition}
+\newtheorem{example}[theorem]{Example}{\normalfont}
+
+% Common math symbols
+\renewcommand{\P}{\mathbb{P}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\R}{\mathbb{R}}
+
+\begin{document}
+
+\lecture{2}{Multivariable Linear Regression}{WSABI Summer Research Lab}{Summer 2024}{Ryan Brill}{Jonathan Pipping}
+
+\section{Motivating Example: NCAA Men's Basketball Power Ratings}
+
+We have a dataset of game results from the 2022-2023 NCAA men's basketball season. As pictured in Figure \ref{fig:ncaa-head}, each row represents a game and includes the following information:
+\begin{itemize}
+    \item[-] $i$: index of the $i^{th}$ game
+    \item[-] $H(i)$: index of the home team
+    \item[-] $A(i)$: index of the away team
+    \item[-] $y_i$: the score differential of game $i$ (home team score - away team score)
+\end{itemize}
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/2_ncaa-head.png}
+    \caption{Head of the 2022-2023 NCAA men's basketball dataset}
+    \label{fig:ncaa-head}
+\end{figure}
+We intend to use this data to generate power ratings (team strength) for each team, which we can do by setting up a model for the score differential.
+
+\section{Setting Up the Model}
+
+Suppose each team $j$ has a latent (unobserved) power rating $\beta_j$. Then, we can model the outcome (score differential) of the $i^{th}$ game as follows:
+\begin{equation}
+y_i = \beta_0 + \beta_{H(i)} - \beta_{A(i)} + \epsilon_i
+\end{equation}
+where $\beta_{H(i)}$ and $\beta_{A(i)}$ are unknown constants representing the strength of the home and away teams, and $\epsilon_i$ is a mean-zero noise term ($\mathbb{E}[\epsilon_i] = 0$). What does $\beta_0$ represent?
+
+What does this look like in each line of the dataset?
+\begin{align*}
+    y_1 &= \beta_0 + \beta_{DePaul} - \beta_{Loyola} + \epsilon_1 \\
+    y_2 &= \beta_0 + \beta_{Duke} - \beta_{Jacksonville} + \epsilon_2 \\
+    y_3 &= \beta_0 + \beta_{Miami} - \beta_{Evansville} + \epsilon_3 \\
+    \vdots
+\end{align*}
+In matrix-vector form, we can write this as
+\begin{equation}
+    \begin{bmatrix}
+        y_1 \\
+        y_2 \\
+        y_3 \\
+        \vdots
+    \end{bmatrix}
+    =
+    \begin{bmatrix}
+        1 & 1 & -1 & 0 & 0 & 0 & 0 &  \hdots \\
+        1 & 0 & 0 & 1 & -1 & 0 & 0 & \hdots \\
+        1 & 0 & 0 & 0 & 0 & 1 & -1 & \hdots \\
+        \vdots & \vdots & \vdots & \vdots & \vdots & \vdots & \vdots
+    \end{bmatrix}
+    \begin{bmatrix}
+        \beta_0 \\
+        \beta_{DePaul} \\
+        \beta_{Loyola} \\
+        \beta_{Duke} \\
+        \beta_{Jacksonville} \\
+        \beta_{Miami} \\
+        \beta_{Evansville} \\
+        \vdots
+    \end{bmatrix}
+    +
+    \begin{bmatrix}
+        \epsilon_1 \\
+        \epsilon_2 \\
+        \epsilon_3 \\
+        \vdots
+    \end{bmatrix}
+\end{equation}
+We can write this more compactly as
+\begin{equation}
+    \mathbf{y} = \mathbf{X} \boldsymbol{\beta} + \boldsymbol{\epsilon}
+\end{equation}
+where $\mathbf{y}$ is a vector of score differentials, $\mathbf{X}$ is a scheduling matrix, $\boldsymbol{\beta}$ is a vector of unknown parameters, and $\boldsymbol{\epsilon}$ is a vector of noise terms. Note that $\mathbf{X}$ consists of an intercept column and a one-hot encoding of the home (1) and away (-1) teams in the remaining columns.
+
+Now, how do we estimate the unknown team strength parameters $\boldsymbol{\beta}$ from the observed data $(\mathbf{X}, \mathbf{y})$?
+
+\section{Estimating Model Parameters}
+
+Recall that in Lecture 1 we estimated $(\beta_0, \beta_1)$ by minimizing the \textbf{Residual Sum of Squares}. Similarly, in multi-variable regression, we minimize the RSS. The optimization problem is:
+\begin{align}
+    \widehat{\boldsymbol{\beta}} &= \arg\min_{\boldsymbol{\beta}} \text{RSS}(\boldsymbol{\beta}) \nonumber \\
+    &= \arg\min_{\boldsymbol{\beta}} \sum_{i=1}^{n} (y_i - x_i^T \boldsymbol{\beta})^2
+\end{align}
+where $x_i$ is the $i^{th}$ row of $\mathbf{X}$ and $x_i^T \boldsymbol{\beta} = x_i \cdot \boldsymbol{\beta} = x_{i1} \beta_0 + x_{i2} \beta_1 + \hdots + x_{i(j+1)} \beta_j$ is the dot product.
+
+We can solve this with calculus, setting the gradient (the multivariable analog of the derivative) equal to 0 and solving for $\boldsymbol{\beta}$ to obtain our estimate $\widehat{\boldsymbol{\beta}}$. Our solution to this problem is:
+\begin{equation}
+    \widehat{\boldsymbol{\beta}} = (\mathbf{X}^T \mathbf{X})^{-1} \mathbf{X}^T \mathbf{y}
+    \label{eq:normal-equations}
+\end{equation}
+These are called the \textbf{Normal Equations} for linear regression.
+
+\section{Back to Our Power Ratings Model}
+
+Now that we know how to estimate $\widehat{\boldsymbol{\beta}}$, we can use \texttt{R} to fit our regression model.
+\begin{lstlisting}[language=R]
+    # fit the linear model
+    model = lm(score_diff ~ X + 0, data = ncaa_data)
+    ratings = model$coefficients
+\end{lstlisting}
+
+Our intercept $\widehat{\beta}_0$ is the average score differential, and since \texttt{score\_diff} is the difference between the home and away score, $\widehat{\beta}_0$ is the home field advantage. In our model, $\widehat{\beta}_0 = 2$ means that being the home team is associated with a 2-point scoring advantage.
+
+We plot the sorted power ratings for each team in Figure \ref{fig:ncaa-ratings}. A zoom-in on 25 randomly-selected teams is shown in Figure \ref{fig:ncaa-25-teams}. If we wanted to predict the score differential for a game between two teams, we would simply take the difference between their power ratings and add the home field advantage.
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/2_ncaa-ratings.png}
+    \caption{Team power ratings for the 2022-2023 NCAA men's basketball season}
+    \label{fig:ncaa-ratings}
+\end{figure}
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/2_ncaa-25-teams.png}
+    \caption{Zoom-in on 25 randomly-selected teams in the 2022-2023 NCAA men's basketball season}
+    \label{fig:ncaa-25-teams}
+\end{figure}
+
+\section{Example: Expected Points in American Football}
+\label{sec:expected-points}
+
+We have a dataset of play-by-play data from the 2022-2023 NFL season. Each row represents a play and includes the following information:
+\begin{itemize}
+    \item[-] $i$: index of the $i^{th}$ play
+    \item[-] $X_i$: yard line (yards from opponent's end zone)
+    \item[-] $y_i$: net points of the next score in the half $\in \{7, 3, 2, 0, -2, -3, -7\}$
+\end{itemize}
+We model $y_i$ as a function of $X_i$. Mathematically, we express this as
+\begin{equation}
+    y_i = f(X_i) + \epsilon_i
+\end{equation}
+where $f$ is some unknown function and $\epsilon_i$ is a mean-zero noise term. As in Section~\ref{sec:expected-points}, we want to estimate the expected value of this quantity:
+\begin{equation}
+    \mathbb{E}[y_i \mid X_i] = f(X_i)
+\end{equation}
+
+Generally, it's a good idea to start with some exploratory data analysis. We plot the relationship between yard line ($X_i$) and net points ($y_i$) in Figure \ref{fig:xp-dot}.
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/2_xp-dot.png}
+    \caption{Relationship between yard line and net points}
+    \label{fig:xp-dot}
+\end{figure}
+As highlighted in Figure \ref{fig:xp-trend}, we see that the relationship bewteen yard line and net points looks quadratic, not linear. How can we use linear regression to capture nonlinear relationships?
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/2_xp-trend.png}
+    \caption{Relationship between yard line and net points}
+    \label{fig:xp-trend}
+\end{figure}
+
+\section{Data Transformations}
+
+We can use a \textbf{data transformation} to capture nonlinear relationships. For example, we can transform the yard line $X_i$ to $X_i^2$ to capture the quadratic relationship we noted in Figure \ref{fig:xp-trend}.
+
+If our linear model setup would be
+\begin{equation}
+    y_i = \beta_0 + \beta_1 X_i + \epsilon_i, \quad \mathbb{E}[\epsilon_i] = 0
+\end{equation}
+then our transformed \textbf{quadratic model} is
+\begin{equation}
+    y_i = \beta_0 + \beta_1 X_i + \beta_2 X_i^2 + \epsilon_i, \quad \mathbb{E}[\epsilon_i] = 0
+\end{equation}
+In matrix-vector form, we maintain the form 
+\begin{equation}
+    \mathbf{y} = \mathbf{X} \boldsymbol{\beta} + \boldsymbol{\epsilon}
+\end{equation}
+but now $\mathbf{X}$ is a matrix with three columns instead of two: the intercept column, the $X_i$ column, and the $X_i^2$ column. Explicitly, we have
+\begin{equation}
+    \begin{bmatrix}
+        y_1 \\
+        y_2 \\
+        y_3 \\
+        \vdots
+    \end{bmatrix}_{\mathbf{y}}
+    =
+    \begin{bmatrix}
+        1 & X_1 & X_1^2 \\
+        1 & X_2 & X_2^2 \\
+        1 & X_3 & X_3^2 \\
+        \vdots & \vdots & \vdots
+    \end{bmatrix}_{\mathbf{X}}
+    \begin{bmatrix}
+        \beta_0 \\
+        \beta_1 \\
+        \beta_2
+    \end{bmatrix}_{\boldsymbol{\beta}}
+    +
+    \begin{bmatrix}
+        \epsilon_1 \\
+        \epsilon_2 \\
+        \epsilon_3 \\
+        \vdots
+    \end{bmatrix}_{\boldsymbol{\epsilon}}
+    \label{eq:quadratic-matrix}
+\end{equation}
+As before, we solve for $\widehat{\boldsymbol{\beta}}$ with the normal equations from Equation~\ref{eq:normal-equations}:
+\begin{equation}
+    \widehat{\boldsymbol{\beta}} = (\mathbf{X}^T \mathbf{X})^{-1} \mathbf{X}^T \mathbf{y}
+\end{equation}
+We turn to \texttt{R} to fit our linear and quadratic models.
+\begin{lstlisting}[language=R]
+    # linear model
+    l_model = lm(next_score ~ yds_to_end, data = nfl_data)
+    l_coef = l_model$coefficients
+    # quadratic model
+    q_model = lm(next_score ~ yds_to_end + I(yds_to_end^2), data = nfl_data)
+    q_coef = q_model$coefficients
+\end{lstlisting}
+We plot the models in Figure \ref{fig:xp-models}, and the quadratic model clearly fits the data better.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/2_xp-models.png}
+    \caption{Linear and quadratic models fit to the data}
+    \label{fig:xp-models}
+\end{figure}
+
+\section{Example: NFL Draft Expected Value Curve}
+
+We have a dataset of NFL draft picks. As pictured in Figure \ref{fig:draft-head}, each row represents a draft pick and contains the following information:
+\begin{itemize} 
+    \item[-] $i$: index of the $i^{th}$ draft pick
+    \item[-] $X_i$: player $i$'s draft pick number
+    \item[-] $y_i$: player $i$'s first contract "performance value" (Massey-Thaler, 2013)
+\end{itemize}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/2_draft-head.png}
+    \caption{Head of the NFL draft dataset}
+    \label{fig:draft-head}
+\end{figure}
+We model the outcome of a draft pick $y_i$ as a function of draft position $X_i$. Mathematically, we have
+\begin{equation}
+    y_i = f(X_i) + \epsilon_i
+\end{equation}
+where $f$ is some unknown function and $\epsilon_i$ is a mean-zero noise term. As in Section~\ref{sec:expected-points}, we want to estimate the expected value of this quantity:
+\begin{equation}
+    \mathbb{E}[y_i \mid X_i] = f(X_i)
+\end{equation}
+We proceed by plotting the relationship between draft position and first contract performance value in Figure \ref{fig:draft-dot}.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/2_draft-dot.png}
+    \caption{Relationship between draft position and first contract performance value}
+    \label{fig:draft-dot}
+\end{figure}
+Once again, the expected value $\mathbb{E}(y|X)$ looks nonlinear. In particular, the relationship is convex: the dropoff between picks $t$ and $t+1$ decreases as $t$ increases. How do we select a function to model this?
+
+\subsection{Splines}
+
+To model a general nonlinear relationship, we can use a piecewise polynomial function, or \textbf{spline}. To implement this, we fit a separate (usually-cubic) polynomial to different subsections of the data. For example, we could fit a separate cubic polynomial in each round of the draft. Since there are 32 picks per round, our $7$ separators (or \textbf{knots}) would be at 33, 65, 97, 129, 161, 193, and 225.
+
+To force our fitted spline to be \textbf{smooth}, we enforce second-order (or C2) continuity, which means that at each knot, the spline, its first derivative, and its second derivative are all continuous.
+
+\subsection{Deriving Solution to a One-Knot Spline}
+
+Suppose we fit a cubic spline with one knot at $x = k$ (e.g. $x = 129$, at the middle of the draft). We model $y_i = f(x_i | \boldsymbol{\beta}) + \epsilon_i$, where $f$ is the spline and $\boldsymbol{\beta}$ are the spline parameters.
+
+We express the function as a piecewise polynomial:
+\begin{equation}
+    f(x | \boldsymbol{\beta}) = \begin{cases}
+        \beta_0 + \beta_1 x + \beta_2 x^2 + \beta_3 x^3, & \text{if } x \leq k \\
+        \beta_4 + \beta_5 x + \beta_6 x^2 + \beta_7 x^3, & \text{if } x \geq k
+    \end{cases}
+\end{equation}
+And we enforce the following continuity constraints:
+\begin{align*}
+    \lim_{x \to k^-} f(x | \boldsymbol{\beta}) &= \lim_{x \to k^+} f(x | \boldsymbol{\beta}) \\
+    \lim_{x \to k^-} f'(x | \boldsymbol{\beta}) &= \lim_{x \to k^+} f'(x | \boldsymbol{\beta}) \\
+    \lim_{x \to k^-} f''(x | \boldsymbol{\beta}) &= \lim_{x \to k^+} f''(x | \boldsymbol{\beta})
+\end{align*}
+From these constraints, we have the following system of equations:
+\begin{align*}
+    \beta_0 + \beta_1 k + \beta_2 k^2 + \beta_3 k^3 &= \beta_4 + \beta_5 k + \beta_6 k^2 + \beta_7 k^3 \\
+    \beta_1 + 2\beta_2 k + 3\beta_3 k^2 &= \beta_5 + 2\beta_6 k + 3\beta_7 k^2 \\
+    \beta_2 + 6\beta_3 k &= \beta_6 + 6\beta_7 k
+\end{align*}
+Solving for $\beta_5, \beta_6$, and $\beta_7$, we have
+\begin{align*}
+    \beta_5 &= (\beta_0 + \beta_1 k + \beta_2 k^2 + \beta_3 k^3 - \beta_4 - \beta_6 k^2 - \beta_7 k^3) / k \\
+    \beta_6 &= (\beta_1 + 2 \beta_2 k + 3 \beta_3 k^2 = \beta_5 - 3\beta_7 k^2) / 2k \\
+    \beta_7 &= (\beta_2 + 3 \beta_3 k - \beta_6) / 3k
+\end{align*}
+And we see that $\beta_5, \beta_6$, and $\beta_7$ are completely determined by $\beta_0, \beta_1, \beta_2, \beta_3$, and $\beta_4$, so we only need to estimate 5 paramters! These are estimated by forming the model matrix and performing a multivariable regression.
+
+\subsection{Fitting the Full Spline}
+
+Now we fit the full 7-knot cubic spline on the NFL draft data. We use \texttt{R} to fit the model.
+\begin{lstlisting}[language=R]
+    # fit the full spline
+    full_spline = lm(contract_value ~ splines::bs(draft_pos, degree = 3,
+               knots = seq(33, 225, by = 32)), data = draft_data)
+    # get coefficients
+    full_coef = full_spline$coefficients
+\end{lstlisting}
+However, when we plot the model in Figure \ref{fig:draft-full-spline}, we notice that our model is a big wiggly at the end of the draft. This indicates that our model is overfitting the data (too many knots, not enough data). To fix this, we can reduce the number of knots to get a smoother fit.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/2_draft-full-spline.png}
+    \caption{Full cubic spline fit to the data.}
+    \label{fig:draft-full-spline}
+\end{figure}
+
+When fitting splines, the degrees of freedom is the number of parameters we need to estimate. Generally, this formula is
+\begin{equation}
+    \text{df} = \text{number of knots} + \text{degree of polynomial} + 1
+\end{equation}
+We can specify the degrees of freedom in \texttt{R} with the \texttt{df} argument, which along with the \texttt{degree} argument, specifies the number of knots. Let's try re-fitting the model with 5 degrees of freedom (3rd degree polynomial with 1 knot).
+\begin{lstlisting}[language=R]
+    # fit reduced spline with 5 df
+    red_spline = lm(contract_value ~ splines::bs(draft_pos, degree = 3,
+               df = 5), data = draft_data)
+    # get coefficients
+    red_coef = red_spline$coefficients
+\end{lstlisting}
+When we plot this new spline in Figure \ref{fig:draft-red-spline}, it's clear we have a much smoother fit that does not overfit to the data.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/2_draft-red-spline.png}
+    \caption{Reduced cubic spline fit to the data.}
+    \label{fig:draft-red-spline}
+\end{figure}
+
+\section*{References}
+\beginrefs
+\bibentry{M-T}{Massey, C. \& Thaler, R.}, 
+{\it The Loser's Curse},
+{Management Science},
+{2013}.
+\endrefs
+\end{document}
