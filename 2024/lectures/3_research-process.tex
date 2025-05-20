@@ -1,0 +1,285 @@
+% Page setup
+\documentclass[twoside]{article}
+\setlength{\oddsidemargin}{0 in}
+\setlength{\evensidemargin}{0 in}
+\setlength{\topmargin}{-0.6 in}
+\setlength{\textwidth}{6.5 in}
+\setlength{\textheight}{8.5 in}
+\setlength{\headsep}{0.75 in}
+\setlength{\parindent}{0 in}
+\setlength{\parskip}{0.1 in}
+
+% Essential packages
+\usepackage{amsmath,amsfonts,amsthm,graphicx,bm,bbm}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{float}
+\usepackage{footmisc}
+\usepackage{color}
+\renewcommand{\thefootnote}{\alph{footnote}}
+
+% Counter setup for lecture numbering
+\newcounter{lecnum}
+\renewcommand{\thepage}{\thelecnum-\arabic{page}}
+\renewcommand{\thesection}{\thelecnum.\arabic{section}}
+\renewcommand{\theequation}{\thelecnum.\arabic{equation}}
+\renewcommand{\thefigure}{\thelecnum.\arabic{figure}}
+\renewcommand{\thetable}{\thelecnum.\arabic{table}}
+
+% Lecture header command
+\newcommand{\lecture}[6]{
+   \pagestyle{myheadings}
+   \thispagestyle{plain}
+   \newpage
+   \setcounter{lecnum}{#1}
+   \setcounter{page}{1}
+   \noindent
+   \begin{center}
+   \framebox{
+      \vbox{\vspace{2mm}
+    \hbox to 6.28in { {\bf #3 \hfill #4} }
+       \vspace{4mm}
+       \hbox to 6.28in { {\Large \hfill Lecture #1: #2  \hfill} }
+       \vspace{2mm}
+       \hbox to 6.28in { {\it Instructor: #5 \hfill Scribe: #6} }
+      \vspace{2mm}}
+   }
+   \end{center}
+   \markboth{Lecture #1: #2}{Lecture #1: #2}
+}
+
+% Citation and reference commands
+\renewcommand{\cite}[1]{[#1]}
+\def\beginrefs{\begin{list}%
+        {[\arabic{equation}]}{\usecounter{equation}
+         \setlength{\leftmargin}{2.0truecm}\setlength{\labelsep}{0.4truecm}%
+         \setlength{\labelwidth}{1.6truecm}}}
+\def\endrefs{\end{list}}
+\def\bibentry#1{\item[\hbox{[#1]}]}
+
+% Figure command
+\newcommand{\fig}[3]{
+\vspace{#2}
+\begin{center}
+Figure \thelecnum.#1:~#3
+\end{center}
+}
+
+% Theorem environments
+\newtheorem{theorem}{Theorem}[lecnum]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{claim}[theorem]{Claim}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{definition}[theorem]{Definition}
+\theoremstyle{definition}
+\newtheorem{example}[theorem]{Example}{\normalfont}
+
+% Common math symbols
+\renewcommand{\P}{\mathbb{P}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\R}{\mathbb{R}}
+
+\begin{document}
+
+\lecture{3}{Example of the Research Process}{WSABI Summer Research Lab}{Summer 2024}{Ryan Brill}{Jonathan Pipping}
+
+\section{Getting Started}
+
+Suppose you want to start a sports analytics research project, but you don't have any ideas yet. Where do you start? A fantastic way to get started is to simply read about something you're interested in.
+
+\subsection{Wins Above Replacement}
+
+Perhaps you were listening to a podcast or reading an article and came across an interesting fact: Roger Clemens has the most career \textbf{Wins Above Replacement (WAR)}, 133.7, in Major League Baseball history. You may also have heard that Pedro Martinez recorded the highest-ever single-season WAR, 11.6, according to FanGraphs.
+
+You may think that WAR is a pretty cool concept, and it makes some intuitive sense as to why it seems like a good way to evaluate pitchers, and more broadly, all players.
+
+\begin{definition}[Wins Above Replacement (WAR)]
+Replace a player with a replacement-level player (e.g., the best player you could get off waivers). How many fewer wins would the team have, assuming average teammates and opponents?
+\end{definition}
+
+\textbf{Implementation.} Take a player's observed performance, ignoring/adjusting for things they're not responsible for, and map that to wins.
+
+You may not know the math behind WAR, but since you're interested you \textbf{read about it}. The most widely-used public WAR implementations are from \href{https://library.fangraphs.com/war/calculating-war-pitchers/}{FanGraphs} and \href{https://www.baseball-reference.com/about/war_explained_pitch.shtml}{Baseball Reference}, so we should read up on those.
+
+\subsection{WAR for Pitchers}
+
+When you read about WAR for pitchers, a few things might catch your eye:
+\begin{enumerate}
+    \item WAR involves mapping a pitcher's performance to wins. FanGraphs uses Fielding Independent Pitching (FIP), while Baseball Referance uses Expected Runs Allowed (xRA).
+    \begin{itemize}
+        \item[-] Fangraphs uses a version of FIP called \textbf{ifFIP} to calculate WAR. This variation includes home runs, walks, hit-by-pitches, strikeouts, and infield fly balls. The formula is:
+        \begin{equation}
+            \text{ifFIP} = \frac{13HR + 3(BB+HPB) - 2(K + IFFB)}{IP} + C
+        \end{equation}
+        where $C$ is a constant that depends on league factors. More specifically,
+        \begin{equation}
+            C = \text{lgERA} - \text{lgifFIP}
+        \end{equation}
+        where $\text{lgERA}$ is the league ERA and $\text{lgifFIP}$ is the league ifFIP.
+        \item[-] Baseball Reference calculates WAR using \textbf{xRA}, which ignores event ordering (e.g. 1B, out, out, 1B, HR, out vs HR, 1B, 1B, out, out, out) and just uses the events (1 HR, 2 1B, 3 out) to calculate the expected runs allowed of each inning.
+    \end{itemize}
+    \item There are a series of convoluted adjustments on top of the base performance metric (e.g. league adjustment, team defense adjustment).
+    \item WAR involves mapping a pitcher's performance \textbf{averaged} over the entire season into wins.
+    \begin{itemize}
+        \item[-] ifFIP divides by IP
+        \item[-] xRA divides by seasonal xRA
+    \end{itemize}
+\end{enumerate}
+
+\color{red}
+\textbf{Thoughts: averaging pitcher performance over the course of a season seems odd. We should explore the implications of these modeling assumptions.}
+\color{black}
+
+\section{Identifying the Problem}
+
+\subsection{Example 1: Max Scherzer}
+
+In Table \ref{tab:scherzer}, we can see Max Scherzer's performance over six games prior to the 2014 All-Star Break. From everything we know about baseball, having four dominant performances ($\leq 1$ run allowed) should translate into $\geq 4$ wins across the 6 games. However, if we average his performance over the 6 games:
+\begin{align*}
+    \frac{15 \text{ runs}}{41 \text{ IP}} \times 9\, \frac{\text{innings}}{\text{game}} &= 3.66\, \frac{\text{runs}}{\text{complete game}} \\
+    \text{And } 3.66\, \frac{\text{runs}}{\text{complete game}} &\approx 0.55 \frac{\text{win prob.}}{\text{complete game}}
+\end{align*}
+Over the course of 6 games, this would translate into $\approx 3.30 wins$, a big discrepancy from the 4+ wins we would expect. Let's look at another example.
+
+\begin{table}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/3_scherzer.png}
+    \caption{Max Scherzer's performance over six games prior to the 2014 All-Star Break.}
+    \label{tab:scherzer}
+\end{table}
+
+\subsection{Example 2: Hypothetical Pitchers}
+
+Assume we are choosing between two pitchers, A and B, with equal ERAs.
+\begin{itemize}
+    \item[-] Pitcher A allows 5 runs per complete game.
+    \item[-] Pitcher B alternates between allowing 10 and 0 runs per complete game.
+\end{itemize}
+
+Which pitcher would you rather have? The answer is obvious: pitcher B. However, existing WAR methodologies would value these 2 pitchers the exact same. This highlights a problem with existing WAR methodology.
+
+\subsection{Example 3: Inconsistent Pitchers}
+
+Once again, we are choosing between two pitchers, except this time they are both inconsistent.
+\begin{itemize}
+    \item[-] Pitcher A alternates between allowing 7 and 0 runs per complete game.
+    \item[-] Pitcher B alternates between allowing 14 and 0 runs per complete game.
+\end{itemize}
+Existing WAR methodologies would see that pitcher A averages 3.5 RA/CG, pitcher B averages 7 RA/CG, and therefore value pitcher A way more than pitcher B.
+
+However, a knowledge of baseball tells us that both pitcher A and pitcher B win half of their games, so they should be valued roughly evenly. What does this teach us?
+\begin{enumerate}
+    \item[-] You can only lose a game once!
+    \item[-] Not all runs allowed have the same value!
+    \begin{itemize}
+        \item[-] The 8th run allowed in a game is "worth" far less than the 1st
+        \item[-] The marginal difference in the win probability between allowing the 7th vs 8th run is less than the marginal difference in win probability between allowing the 1st and 2nd run, since in the first scenario you've already lost the game
+        \item[-] If $R \mapsto \text{WAR}(R)$ is game WAR as a function of runs allowed, then $\text{WAR}(R) - \text{WAR}(R - 1)$ should get smaller as $R$ gets bigger. Mathematically, this means that $R \mapsto \text{WAR}(R)$ should be convex.
+    \end{itemize}
+\end{enumerate}
+\subsection{What's the Problem?}
+\color{red}
+
+\textbf{The Problem:} Averaging pitcher performance over the course of the season is clearly wrong. Why?
+\color{black}
+\begin{itemize}
+    \item[-] It ignores the game-by-game variance in pitcher performance.
+    \item[-] $R \mapsto \text{WAR}(R)$ should be convex (i.e. not all runs should have the same value).
+    \item[-] A \textbf{win} is the fundamental result of a \textbf{game}, not a season.
+\end{itemize}
+\textbf{Goal:} Fix this problem, beginning with \textbf{one incremental improvement}. That's \textbf{RESEARCH}.
+
+We can begin by calculating historical WAR in each invidual game, then setting seasonal WAR as the sum of game WAR. Then the \textbf{Task} is to calculate game WAR for starting pitchers.
+
+\section{Game WAR for Starting Pitchers}
+
+How do we do this? Let's break WAR down into its components.
+\begin{itemize}
+    \item[-] Wins (W): How many wins did a starter contribute in this game?
+    \item[-] Above Replacement ($W_{rep}$): How many wins would a replacement-level pitcher have contributed? 
+\end{itemize}
+We put these together to get the formula for Game WAR:
+\begin{equation}
+    \text{Game WAR} = W - W_{rep}
+\end{equation}
+Let's start with the first component: mapping a pitcher's performance to wins. Mathematically, we have some notion of that in the form of \textbf{win probability}, but we also need to ensure proper \textbf{pitcher valuation}: judging a pitcher only on things he's responsible for. What goes into this?
+
+\subsection{Evaluating Pitcher Performance}
+
+A starting pitcher's in-game performance is a function of the following:
+\begin{itemize}
+    \item[-] Runs Allowed (R): The number of runs scored against the pitcher.
+    \item[-] Exit Inning (I): The inning in which a pitcher exits the game. Indicates how long the pitcher pitched.
+    \item[-] Exit Outs (O): The number of outs when a pitcher is removed. Indicates how deep into the inning the pitcher pitched.
+    \item[-] Exit Base-State (S): The number of outs when a pitcher is removed. Indicates if the pitcher left the game with runners on base.
+\end{itemize}
+Of these, runs allowed is clearly the most important, because winning a game is defined by Runs. However, there are a number of confounders (or variables outside of his control that affect his performance) that we should be aware of:
+\begin{itemize}
+    \item[-] Park: Major League parks are not all the same dimensions, and the climate often differs greatly between cities. Both of these have a significant impact on the number of runs scored.
+    \item[-] Opposing Team's Batting Quality: Facing a lineup with many good hitters (e.g. Yankees, Dodgers) should result in more runs scored than facing a lineup with many bad hitters (e.g. Chicago White Sox).
+    \item[-] His Team's Fielding Quality: The quality of the defense behind the pitcher can have a significant impact on the number of runs scored.
+\end{itemize}
+Finally, there are contextual variables that affect win probability at any point in the game:
+\begin{itemize}
+    \item[-] League (AL/NL): The quality and different rules of the American and National Leagues can have a significant impact on the number of runs scored.
+    \item[-] Year: Year-to-year differences in the balls/bats used, rule changes, average player quality, and more can have a significant impact on the run-scoring environment.
+\end{itemize}
+Note that some variables do \textbf{not} affect a pitcher's performance, so we should make sure to explicitly omit them:
+\begin{itemize}
+    \item[-] His Team's Batting Quality: The quality of a pitcher's offense is not under his control.
+    \item[-] Opposing Team's Defense: The quality of the defense behind the other pitcher(s) is independent of Pitcher $A$'s performance.
+\end{itemize}
+Now that we're aware of how to measure a pitcher's performance and the confounders we need to account for, we can move onto the next step: defining a function that maps performance to wins.
+\subsection{Mapping Performance to Wins}
+It can be tempting to try to tackle this entire problem at once, but that's a recipe for failure. Instead, we \textbf{start simple}, beginning with the easiest version of the task and iterating from there. Let's start with \textbf{just} observed performance, then adjust for confounders later.
+
+\textbf{Task:} Given a pitcher's performance in a game, what's his team's win probability when he exits the game?
+\begin{itemize}
+    \item[-] Context-neutral: Assume league-average offenses, defenses, and ignore his team's runs scored.
+    \item[-] Start simple: Assume he finishes the inning, so ignore $O$ and $S$.
+\end{itemize}
+We then model the function $f(R, I)$; assuming both teams have league-average offenses, compute the probability a team wins a game after giving up $R$ runs through $I$ complete innings.
+
+Since $f(R, I)$ can be visualized as a 2D grid, we name this metric \textbf{Grid WAR}.
+
+\color{red}
+\textbf{This is the simplest version of the question, and it is nontrivial. We now have the foundation of a research project.}
+\color{black}
+\section{Takeaways}
+
+In general, there are two great ways to begin research in applied statistics (especially in sports).
+\begin{enumerate}
+    \item "Read First": Read a paper/article/blog post about sports statistics. Replicate it, then check what else has been done and replicate the state of the art. Then, identify one thing you don't like and make an incremental improvement.
+    \begin{itemize}
+        \item[-] ex: \href{https://www.degruyterbrill.com/document/doi/10.1515/jqas-2023-0095/html}{Grid WAR}
+    \end{itemize}
+    \item "Think First": Think of a cool idea, read relevant literature and replicate the state of the art (if any), then solve the problem.
+    \begin{itemize}
+        \item[-] ex: \href{https://www.mdpi.com/1099-4300/26/8/615}{Entropy-Based Strategies for Multi-Bracket Pools}
+    \end{itemize}
+\end{enumerate}
+
+\section*{References}
+\beginrefs
+\bibentry{BR}{Baseball Reference}, 
+{\it \href{https://www.baseball-reference.com/about/war_explained_pitch.shtml}{Pitcher WAR Calculations and Details}},
+{Baseball Reference},
+{2024}.
+
+\bibentry{FG}{Slowinski, P.}, 
+{\it \href{https://library.fangraphs.com/war/calculating-war-pitchers/}{Calculating WAR for Pitchers}},
+{FanGraphs},
+{2012}.
+
+\bibentry{GWAR}{Brill, R. \& Wyner, A.J.}, 
+{\it \href{https://www.degruyterbrill.com/document/doi/10.1515/jqas-2023-0095/html}{Introducing Grid WAR: rethinking WAR for starting pitchers}},
+{JQAS},
+{2024}.
+
+\bibentry{MMB}{Brill, R., Wyner, A.J. \& Barnett, I.}, 
+{\it \href{https://www.mdpi.com/1099-4300/26/8/615}{Entropy-Based Strategies for Multi-Bracket Pools}},
+{Entropy},
+{2024}.
+\endrefs
+\end{document}
