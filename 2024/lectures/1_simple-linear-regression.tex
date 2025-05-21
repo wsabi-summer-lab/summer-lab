@@ -87,11 +87,11 @@ Figure \thelecnum.#1:~#3
 Suppose we have access to each MLB player's 2020 and 2021 batting averages and no other information. How would we predict a player's 2021 batting average from their 2020 one?
 
 Generally, a good idea is to start with exploratory data analysis. Let's plot the data and see what we learn.
-\begin{figure}[h]
+\begin{figure}[H]
     \centering
-    \includegraphics[width=0.6\textwidth]{figures/1_ba-dot.png}
+    \includegraphics[width=0.6\textwidth]{figures/1_ba-scatter.png}
     \caption{Batting Averages for MLB Players in 2020 and 2021}
-    \label{fig:ba-dot}
+    \label{fig:ba-scatter}
 \end{figure}
 
 What does the relationship look like?
@@ -101,7 +101,7 @@ What does the relationship look like?
     \item[-] You might imagine drawing a best fit line through the points
 \end{itemize}
 Let's plot that line of best fit!
-\begin{figure}[h]
+\begin{figure}[H]
     \centering
     \includegraphics[width=0.6\textwidth]{figures/1_ba-line.png}
     \caption{Line of Best Fit for MLB Batting Averages}
@@ -137,7 +137,7 @@ Find the values $\widehat{\beta}_0$ and $\widehat{\beta}_1$ that minimize the \t
 \end{align}
 \end{definition}
 Visually, we can think of the RSS as the sum of the squared vertical distances between the observed points and the fitted line (or the squared residuals). In Figure \ref{fig:ba-rss}, we plot the residuals for each point. 
-\begin{figure}[h]
+\begin{figure}[H]
     \centering
     \includegraphics[width=0.6\textwidth]{figures/1_ba-rss.png}
     \caption{Residuals for MLB Batting Averages}
@@ -231,7 +231,7 @@ So if $X$ and $Y$ have the same scale (or sample variance), then the sample corr
 \subsection{Correlation Can Be Misleading}
 
 Correlation is a measure of \textbf{linear association} between two variables. Figure \ref{fig:equal-corr} shows four plots with equal correlation, but they have \textbf{very} different relationships. What does this tell us?
-\begin{figure}[h]
+\begin{figure}[H]
     \centering
     \includegraphics[width=0.6\textwidth]{figures/1_equal-corr.png}
     \caption{Four scatter plots with equal correlation}

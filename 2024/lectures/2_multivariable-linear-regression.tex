@@ -92,7 +92,7 @@ We have a dataset of game results from the 2022-2023 NCAA men's basketball seaso
     \item[-] $A(i)$: index of the away team
     \item[-] $y_i$: the score differential of game $i$ (home team score - away team score)
 \end{itemize}
-\begin{figure}[h]
+\begin{figure}[H]
     \centering
     \includegraphics[width=0.6\textwidth]{figures/2_ncaa-head.png}
     \caption{Head of the 2022-2023 NCAA men's basketball dataset}
@@ -184,13 +184,13 @@ Now that we know how to estimate $\widehat{\boldsymbol{\beta}}$, we can use \tex
 Our intercept $\widehat{\beta}_0$ is the average score differential, and since \texttt{score\_diff} is the difference between the home and away score, $\widehat{\beta}_0$ is the home field advantage. In our model, $\widehat{\beta}_0 = 2$ means that being the home team is associated with a 2-point scoring advantage.
 
 We plot the sorted power ratings for each team in Figure \ref{fig:ncaa-ratings}. A zoom-in on 25 randomly-selected teams is shown in Figure \ref{fig:ncaa-25-teams}. If we wanted to predict the score differential for a game between two teams, we would simply take the difference between their power ratings and add the home field advantage.
-\begin{figure}[h]
+\begin{figure}[H]
     \centering
     \includegraphics[width=0.6\textwidth]{figures/2_ncaa-ratings.png}
     \caption{Team power ratings for the 2022-2023 NCAA men's basketball season}
     \label{fig:ncaa-ratings}
 \end{figure}
-\begin{figure}[h]
+\begin{figure}[H]
     \centering
     \includegraphics[width=0.6\textwidth]{figures/2_ncaa-25-teams.png}
     \caption{Zoom-in on 25 randomly-selected teams in the 2022-2023 NCAA men's basketball season}
@@ -215,15 +215,15 @@ where $f$ is some unknown function and $\epsilon_i$ is a mean-zero noise term. A
     \mathbb{E}[y_i \mid X_i] = f(X_i)
 \end{equation}
 
-Generally, it's a good idea to start with some exploratory data analysis. We plot the relationship between yard line ($X_i$) and net points ($y_i$) in Figure \ref{fig:xp-dot}.
-\begin{figure}[h]
+Generally, it's a good idea to start with some exploratory data analysis. We plot the relationship between yard line ($X_i$) and net points ($y_i$) in Figure \ref{fig:xp-scatter}.
+\begin{figure}[H]
     \centering
-    \includegraphics[width=0.6\textwidth]{figures/2_xp-dot.png}
+    \includegraphics[width=0.6\textwidth]{figures/2_xp-scatter.png}
     \caption{Relationship between yard line and net points}
-    \label{fig:xp-dot}
+    \label{fig:xp-scatter}
 \end{figure}
 As highlighted in Figure \ref{fig:xp-trend}, we see that the relationship bewteen yard line and net points looks quadratic, not linear. How can we use linear regression to capture nonlinear relationships?
-\begin{figure}[h]
+\begin{figure}[H]
     \centering
     \includegraphics[width=0.6\textwidth]{figures/2_xp-trend.png}
     \caption{Relationship between yard line and net points}
@@ -319,12 +319,12 @@ where $f$ is some unknown function and $\epsilon_i$ is a mean-zero noise term. A
 \begin{equation}
     \mathbb{E}[y_i \mid X_i] = f(X_i)
 \end{equation}
-We proceed by plotting the relationship between draft position and first contract performance value in Figure \ref{fig:draft-dot}.
+We proceed by plotting the relationship between draft position and first contract performance value in Figure \ref{fig:draft-scatter}.
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.6\textwidth]{figures/2_draft-dot.png}
+    \includegraphics[width=0.6\textwidth]{figures/2_draft-scatter.png}
     \caption{Relationship between draft position and first contract performance value}
-    \label{fig:draft-dot}
+    \label{fig:draft-scatter}
 \end{figure}
 Once again, the expected value $\mathbb{E}(y|X)$ looks nonlinear. In particular, the relationship is convex: the dropoff between picks $t$ and $t+1$ decreases as $t$ increases. How do we select a function to model this?
 
@@ -377,7 +377,7 @@ Now we fit the full 7-knot cubic spline on the NFL draft data. We use \texttt{R}
 \end{lstlisting}
 However, when we plot the model in Figure \ref{fig:draft-full-spline}, we notice that our curve is a big wiggly at the end of the draft. This indicates that our model is overfitting to the data (too many knots, not enough data). To fix this, we can reduce the number of knots to get a smoother fit.
 
-\begin{figure}[h]
+\begin{figure}[H]
     \centering
     \includegraphics[width=0.6\textwidth]{figures/2_draft-full-spline.png}
     \caption{Full cubic spline fit to the data.}
