@@ -193,7 +193,7 @@ Before, we had a model of the form:
 \end{equation}
 Now, we modify this model so that our predictions $\widehat{y}_i$ are between 0 and 1. We can do this by making our response variable $\widehat{y}_i$ the output of the logistic function:
 \begin{equation}
-    \widehat{y}_i = \text{Logistic}(\beta_0 + \beta_1 x_i) = \frac{1}{1 + e^{-\beta_0 + \beta_1 x_i}}
+    \widehat{y}_i = \text{Logistic}(\beta_0 + \beta_1 x_i) = \frac{1}{1 + e^{-(\beta_0 + \beta_1 x_i)}}
 \end{equation}
 This is a \textbf{logistic regression model}, and allows us to model the \textbf{probability} that a putt is sunk directly. Mathematically, we can write this model as:
 \begin{align}
@@ -278,7 +278,7 @@ In Figure \ref{fig:putt-logistic-zoomed}, we see that the model is able to extra
 
 We can do even better by modeling the log odds with a cubic polynomial. Our new model is:
 \begin{equation}
-    \mathbb{P}(y_i = 1 \mid x_i) = \frac{1}{1 + e^{-\beta_0 + \beta_1 x_i + \beta_2 x_i^2 + \beta_3 x_i^3}}
+    \mathbb{P}(y_i = 1 \mid x_i) = \frac{1}{1 + e^{-(\beta_0 + \beta_1 x_i + \beta_2 x_i^2 + \beta_3 x_i^3)}}
 \end{equation}
 We fit this model in \texttt{R} with the following code:
 \begin{lstlisting}[language=R]
