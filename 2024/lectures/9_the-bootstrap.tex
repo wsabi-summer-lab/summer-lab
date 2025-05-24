@@ -1,0 +1,209 @@
+% Page setup
+\documentclass[twoside]{article}
+\setlength{\oddsidemargin}{0 in}
+\setlength{\evensidemargin}{0 in}
+\setlength{\topmargin}{-0.6 in}
+\setlength{\textwidth}{6.5 in}
+\setlength{\textheight}{8.5 in}
+\setlength{\headsep}{0.75 in}
+\setlength{\parindent}{0 in}
+\setlength{\parskip}{0.1 in}
+
+% Essential packages
+\usepackage{amsmath,amsfonts,amsthm,graphicx,bm,bbm}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{float}
+\usepackage{footmisc}
+\usepackage{color}
+\renewcommand{\thefootnote}{\alph{footnote}}
+
+% Counter setup for lecture numbering
+\newcounter{lecnum}
+\renewcommand{\thepage}{\thelecnum-\arabic{page}}
+\renewcommand{\thesection}{\thelecnum.\arabic{section}}
+\renewcommand{\theequation}{\thelecnum.\arabic{equation}}
+\renewcommand{\thefigure}{\thelecnum.\arabic{figure}}
+\renewcommand{\thetable}{\thelecnum.\arabic{table}}
+
+% Lecture header command
+\newcommand{\lecture}[6]{
+   \pagestyle{myheadings}
+   \thispagestyle{plain}
+   \newpage
+   \setcounter{lecnum}{#1}
+   \setcounter{page}{1}
+   \noindent
+   \begin{center}
+   \framebox{
+      \vbox{\vspace{2mm}
+    \hbox to 6.28in { {\bf #3 \hfill #4} }
+       \vspace{4mm}
+       \hbox to 6.28in { {\Large \hfill Lecture #1: #2  \hfill} }
+       \vspace{2mm}
+       \hbox to 6.28in { {\it Instructor: #5 \hfill Scribe: #6} }
+      \vspace{2mm}}
+   }
+   \end{center}
+   \markboth{Lecture #1: #2}{Lecture #1: #2}
+}
+
+% Citation and reference commands
+\renewcommand{\cite}[1]{[#1]}
+\def\beginrefs{\begin{list}%
+        {[\arabic{equation}]}{\usecounter{equation}
+         \setlength{\leftmargin}{2.0truecm}\setlength{\labelsep}{0.4truecm}%
+         \setlength{\labelwidth}{1.6truecm}}}
+\def\endrefs{\end{list}}
+\def\bibentry#1{\item[\hbox{[#1]}]}
+
+% Figure command
+\newcommand{\fig}[3]{
+\vspace{#2}
+\begin{center}
+Figure \thelecnum.#1:~#3
+\end{center}
+}
+
+% Theorem environments
+\newtheorem{theorem}{Theorem}[lecnum]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{claim}[theorem]{Claim}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{definition}[theorem]{Definition}
+\theoremstyle{definition}
+\newtheorem{example}[theorem]{Example}{\normalfont}
+
+% Common math symbols
+\renewcommand{\P}{\mathbb{P}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\R}{\mathbb{R}}
+
+\begin{document}
+
+\lecture{9}{The Bootstrap}{WSABI Summer Research Lab}{Summer 2024}{Ryan Brill}{Jonathan Pipping}
+
+\section{Asymptotic Confidence Intervals}
+
+To this point of the course, we have used the Central Limit Theorem's asymptotic normality to construct confidence intervals for the mean of a random variable. We'll begin by reviewing a few examples of asymptotic confidence intervals.
+
+\begin{example}[Wald Confidence Interval for the Binomial Parameter]
+    The $(1-\alpha)\cdot 100\%$ Wald Confidence Interval for the binomial parameter $p$ is given by
+    \begin{equation}
+        \widehat{p} \pm z_{1-\alpha/2} \cdot \sqrt{\frac{\widehat{p}(1-\widehat{p})}{n}}
+    \end{equation}
+    where $n$ is the number of observations and $z_{1-\alpha/2}$ is the $1-\alpha/2$ quantile of the standard normal distribution. \color{red} \textit{Recall that this was proven by the Central Limit Theorem, which states that the binomial sum is asymptotically normal.} \color{black}
+\end{example}
+
+\begin{example}[Agresti-Coull Confidence Interval for the Binomial Parameter]
+    The $(1-\alpha)\cdot 100\%$ Agresti-Coull Confidence Interval for the binomial parameter $p$ is given by
+    \begin{equation}
+        \widehat{p} \pm z_{1-\alpha/2} \cdot \sqrt{\frac{\widehat{p}'(1-\widehat{p}')}{n + 4}}, \text{ where } \widehat{p}' = \frac{S_n + 2}{n + 4}
+    \end{equation}
+    where $n$ is the number of observations and $z_{1-\alpha/2}$ is the $1-\alpha/2$ quantile of the standard normal distribution. \color{red} \textit{Recall that this was proven by the Central Limit Theorem, which states that the binomial sum is asymptotically normal.} \color{black}
+\end{example}
+
+\begin{example}[Confidence Interval for Regression Coefficients]
+    The $(1-\alpha)\cdot 100\%$ confidence interval for the linear regression coefficient $\beta_j$ is given by
+    \begin{equation}
+        \widehat{\beta}_j \pm t_{n - k, 1-\alpha/2} \cdot \text{SE}(\widehat{\beta}_j)
+    \end{equation}
+    where $n$ is the number of observations, $k$ is the number of parameters in the model and $t_{n - k, 1-\alpha/2}$ is the $1-\alpha/2$ quantile of the $t$-distribution with $n - k$ degrees of freedom. \color{red} \textit{Note that this carries the implicit assumption that the errors $\epsilon_i$ are normally distributed.} \color{black}
+\end{example}
+
+All three of these examples assume normality, but what if we don't want to make this assumption? Or what if we want to construct a confidence interval that is too complicated to compute analytically? It's for this reason that we introduce the bootstrap.
+
+\section{The Bootstrap}
+
+\begin{definition}[The Bootstrap]
+    The bootstrap is a non-parametric method for obtaining standard errors or constructing confidence intervals without assuming a distribution. It accomplishes this by \textbf{resampling data} from the original sample.
+\end{definition}
+How can we use the bootstrap to construct confidence intervals? We'll begin by implementing the bootstrap for the examples from the previous section.
+
+\subsection{Bootstrap Estimated Binomial Proportion}
+
+Let $T$ represent the full training dataset with observations $\{X_1, \ldots, X_n\}$. To bootstrap with $B$ replications, for each $b = 1, \ldots, B$:
+\begin{enumerate}
+    \item Generate $T^{(b)}$: Re-sample $m$ observations $X_i$ from $T$ with replacement.
+    \item Compute $\widehat{p}^{(b)}$: Estimate $\widehat{p}$ from $T^{(b)}$ as $\widehat{p}^{(b)} = \frac{S_m^{(b)}}{m}$ where $S_m^{(b)} = \sum_{i=1}^m X_i^{(b)}$.
+    \item Sort the $\widehat{p}^{(b)}$s: Order the $\widehat{p}^{(b)}$s from smallest to largest so that $\widehat{p}^{(1)} \leq \widehat{p}^{(2)} \leq \ldots \leq \widehat{p}^{(B)}$.
+\end{enumerate}
+Then we can easily calculate the following quantities of interest:
+\begin{itemize}
+    \item[-] $SE(\widehat{p}) = SD(\widehat{p}^{(1)}, \ldots, \widehat{p}^{(B)}) = \sqrt{\frac{1}{B - 1} \sum_{b=1}^B \left(\widehat{p}^{(b)} - \bar{\widehat{p}}\right)^2}$
+    \item[-] 95\% CI for $p$: $[\widehat{p}^{(2.5^{th} \text{ quantile})}, \widehat{p}^{(97.5^{th} \text{ quantile}})]$
+\end{itemize}
+
+\subsection{Bootstrap Estimated Regression Coefficients}
+
+Let $T$ represent the full training dataset with observations $\{(X_1, y_1), \ldots, (X_n, y_n)\}$. To bootstrap with $B$ replications, for each $b = 1, \ldots, B$:
+\begin{enumerate}
+    \item Generate $T^{(b)}$: Re-sample $m$ observations $(X_i, y_i)$ from $T$ with replacement.
+    \item Compute $\widehat{\beta}^{(b)}$: Estimate $\widehat{\beta}$ from $T^{(b)}$ using the OLS solution $\widehat{\beta}^{(b)} = (X^{(b)^T}X^{(b)})^{-1}X^{(b)^T}y^{(b)}$ where $X^{(b)}$ is the design matrix and $y^{(b)}$ is the response vector for the $b^{th}$ bootstrap sample.
+    \item Sort the $\widehat{\beta}_j^{(b)}$s: Order the $\widehat{\beta}_j^{(b)}$s from smallest to largest so that $\widehat{\beta}_j^{(1)} \leq \widehat{\beta}_j^{(2)} \leq \ldots \leq \widehat{\beta}_j^{(B)}$.
+\end{enumerate}
+Then we can easily calculate the following quantities of interest:
+\begin{itemize}
+    \item[-] $SE(\widehat{\beta}_j) = SD(\widehat{\beta}_j^{(1)}, \ldots, \widehat{\beta}_j^{(B)}) = \sqrt{\frac{1}{B - 1} \sum_{b=1}^B \left(\widehat{\beta}_j^{(b)} - \bar{\widehat{\beta}_j}\right)^2}$
+    \item[-] 95\% CI for $\beta_j$: $[\widehat{\beta}_j^{(2.5^{th} \text{ quantile})}, \widehat{\beta}_j^{(97.5^{th} \text{ quantile}})]$
+\end{itemize}
+
+As we can see, once we re-sample the data and re-estimate the parameters of interest, we can easily calculate the standard error and confidence interval for the parameters with elementary statistics. We now turn to visualizing the bootstrap resampling scheme.
+
+\subsection{Visualizing the Bootstrap}
+
+The re-sampling scheme described above is illustrated in Figure \ref{fig:boot-viz}: first we re-sample the data $B$ times with replacement, estimate the parameters of interest, then sort the estimates and calculate the standard error and confidence interval for the parameter of interest.
+
+Why does this resampling scheme work? Let's compare to how we would ideally obtain standard errors and confidence intervals (which is impossible in practice). First, we would need to sample the population $B$ times with replacement, get $B$ different parameter estimates, then calculate the standard error and confidence interval as before. We visualize this in Figure \ref{fig:pop-viz}.
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/9_boot-viz.png}
+    \caption{Visualization of the Bootstrap Resampling Scheme}
+    \label{fig:boot-viz}
+\end{figure}
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/9_pop-viz.png}
+    \caption{Visualization of the Population Resampling Scheme}
+    \label{fig:pop-viz}
+\end{figure}
+
+
+Bootstrapping works because the training dataset $T$ is itself a sample from the population; thus resampling from $T$ minimics sampling from the population. These two approaches are pictured together in Figure \ref{fig:pop-vs-boot}.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/9_pop-vs-boot.png}
+    \caption{Comparison of the Population Sampling Scheme and the Bootstrap Resampling Scheme}
+    \label{fig:pop-vs-boot}
+\end{figure}
+
+\subsection{Drawbacks}
+
+Like any other method, the bootstrap has its drawbacks. For one, it's not always applicable. For example, bootstrapping works well for the standard error of means, but not for extrema like the max and min. Additionally, the bootstrap is computationally intensive, and can sometimes underestimate uncertainty (meaning the SE is too small and the CI is too narrow). However, we can calibrate the bootstrap to achieve desired coverage probabilities. For more on this, see [BYW].
+
+\section*{References}
+\beginrefs
+\bibentry{AC}{Agresti, A., \& Coull, B.A.},
+{\it \href{http://dx.doi.org/10.1080/00031305.1998.10480550}{Approximate is Better than "Exact" for Interval Estimation of Binomial Proportions}},
+{The American Statistician},
+{1998}.
+
+\bibentry{BCD}{Brown, T.C., Cai, T.T., \& Dasgupta, A.},
+{\it \href{http://www.jstor.org/stable/2676784}{Interval Estimation for a Binomial Proportion}},
+{Statistical Science},
+{2001}.
+
+\bibentry{BYW}{Brill, R. S., Yurko, R., \& Wyner, A. J.},
+{\it \href{https://doi.org/10.1080/00031305.2025.2475801}{Analytics, Have Some Humility: A Statistical View of Fourth-Down Decision Making}},
+{The American Statistician},
+{2025}.
+
+\endrefs
+
+\end{document}
