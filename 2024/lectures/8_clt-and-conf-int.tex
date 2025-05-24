@@ -1,0 +1,251 @@
+% Page setup
+\documentclass[twoside]{article}
+\setlength{\oddsidemargin}{0 in}
+\setlength{\evensidemargin}{0 in}
+\setlength{\topmargin}{-0.6 in}
+\setlength{\textwidth}{6.5 in}
+\setlength{\textheight}{8.5 in}
+\setlength{\headsep}{0.75 in}
+\setlength{\parindent}{0 in}
+\setlength{\parskip}{0.1 in}
+
+% Essential packages
+\usepackage{amsmath,amsfonts,amsthm,graphicx,bm,bbm}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{float}
+\usepackage{footmisc}
+\usepackage{color}
+\renewcommand{\thefootnote}{\alph{footnote}}
+
+% Counter setup for lecture numbering
+\newcounter{lecnum}
+\renewcommand{\thepage}{\thelecnum-\arabic{page}}
+\renewcommand{\thesection}{\thelecnum.\arabic{section}}
+\renewcommand{\theequation}{\thelecnum.\arabic{equation}}
+\renewcommand{\thefigure}{\thelecnum.\arabic{figure}}
+\renewcommand{\thetable}{\thelecnum.\arabic{table}}
+
+% Lecture header command
+\newcommand{\lecture}[6]{
+   \pagestyle{myheadings}
+   \thispagestyle{plain}
+   \newpage
+   \setcounter{lecnum}{#1}
+   \setcounter{page}{1}
+   \noindent
+   \begin{center}
+   \framebox{
+      \vbox{\vspace{2mm}
+    \hbox to 6.28in { {\bf #3 \hfill #4} }
+       \vspace{4mm}
+       \hbox to 6.28in { {\Large \hfill Lecture #1: #2  \hfill} }
+       \vspace{2mm}
+       \hbox to 6.28in { {\it Instructor: #5 \hfill Scribe: #6} }
+      \vspace{2mm}}
+   }
+   \end{center}
+   \markboth{Lecture #1: #2}{Lecture #1: #2}
+}
+
+% Citation and reference commands
+\renewcommand{\cite}[1]{[#1]}
+\def\beginrefs{\begin{list}%
+        {[\arabic{equation}]}{\usecounter{equation}
+         \setlength{\leftmargin}{2.0truecm}\setlength{\labelsep}{0.4truecm}%
+         \setlength{\labelwidth}{1.6truecm}}}
+\def\endrefs{\end{list}}
+\def\bibentry#1{\item[\hbox{[#1]}]}
+
+% Figure command
+\newcommand{\fig}[3]{
+\vspace{#2}
+\begin{center}
+Figure \thelecnum.#1:~#3
+\end{center}
+}
+
+% Theorem environments
+\newtheorem{theorem}{Theorem}[lecnum]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{claim}[theorem]{Claim}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{definition}[theorem]{Definition}
+\theoremstyle{definition}
+\newtheorem{example}[theorem]{Example}{\normalfont}
+
+% Common math symbols
+\renewcommand{\P}{\mathbb{P}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\R}{\mathbb{R}}
+
+\begin{document}
+
+\lecture{8}{Central Limit Theorem \& Confidence Intervals}{WSABI Summer Research Lab}{Summer 2024}{Ryan Brill}{Jonathan Pipping}
+
+\section{Central Limit Theorem}
+
+\begin{theorem}[Central Limit Theorem]
+Suppose $\{X_i\}_{i=1}^n$ are any collection of \textbf{independent and identically-distributed (i.i.d.)} random variables with mean $\mu = \mathbb{E}[X_i] < \infty$ and variance $\sigma^2 = \text{Var}[X_i] < \infty$.
+
+Then as $n \to \infty$, their sum $S_n = \sum_{i=1}^n X_i$ and sample mean $\bar{X}_n = \frac{S_n}{n}$ converge to the standard normal distribution. Specifically,
+\begin{align}
+   \frac{S_n - n\mu}{\sigma \sqrt{n}} &\xrightarrow{d} N(0, 1) \\
+   \frac{\frac{S_n}{n} - \mu}{\frac{\sigma}{\sqrt{n}}} &\xrightarrow{d} N(0, 1)
+\end{align}
+\end{theorem}
+
+\begin{definition}[Convergence in Distribution]
+A sequence of random variables $\{X_n\}_{n=1}^\infty$ converges in distribution to a random variable $X$ if for all $x$ in the support of $X$,
+\begin{equation}
+   \lim_{n \to \infty} \P(X_n \leq x) = \P(X \leq x)
+\end{equation}
+In other words, as $n\to\infty$, the distribution of $X_n$ converges to the distribution of $X$.
+\end{definition}
+What does this mean? If $Z \sim N(0, 1)$, the Central Limit Theorem assures that
+   \begin{equation}
+      \mathbb{P}(a \leq \frac{S_n - n\mu}{\sigma \sqrt{n}} \leq b) \to \mathbb{P}(a \leq Z \leq b) \text{ as } n\to\infty
+   \end{equation}
+Tons of quantities in sports are the sum or mean of i.i.d. random variables, so this normal approximation becomes extremely useful!
+
+\section{The Binomial Parameter}
+
+\subsection{Setting Up The Model}
+
+Player $A$ shoots $n$ free throws, whose results are given by a sequence of random variables $\{X_i\}_{i=1}^n$, where
+\begin{equation}
+   X_i = \begin{cases}
+      1 & \text{if the $i^{th}$ free throw is made} \\
+      0 & \text{if the $i^{th}$ free throw is missed}
+   \end{cases}
+\end{equation}
+Then $S_n = \sum_{i=1}^n X_i$ is the total number of free throws made by player $A$. We model $S_n$ as follows:
+\begin{equation}
+   S_n \sim \text{Binomial}(n, p)
+\end{equation}
+where $n$ is the number of free throws attempted and $p$ is the probability of making a free throw. A Binomial random variable is the sum of $n$ independent Bernoulli$(p)$ random variables.
+
+\subsection{Estimating the Binomial Proportion}
+
+We want to estimate player $A$'s probability of making a free throw, $p$ from the data $\{X_i\}_{i=1}^n$. Our ``best guess'' of $p$ is
+\begin{equation}
+   \widehat{p} = \frac{S_n}{n} = \frac{1}{n} \sum_{i=1}^n X_i
+\end{equation}
+In fact, this is the \textbf{Maximum Likelihood Estimator (MLE)} of $p$. You will prove this in the Homework. But how confident should we be in this estimate? We answer this question by constructing an asymptotic confidence interval for $p$.
+
+\subsection{Confidence Interval for the Binomial Proportion}
+
+Recall that each $X_i$ is a Bernoulli$(p)$ random variable representing the result of the $i^{th}$ free throw. We know the mean and variance of a Bernoulli random variable:
+\begin{align}
+   \mu = \mathbb{E}[X_i] &= p \\
+   \sigma^2 = \text{Var}[X_i] &= p(1-p)
+\end{align}
+Since $\{X_i\}_{i=1}^n$ are i.i.d., we can use the CLT to approximate the distribution of $S_n = \sum_{i=1}^n X_i$. We don't know the true variance, but we can estimate it by $\widehat{p}(1-\widehat{p})$. Then by the CLT,
+\begin{equation}
+   \frac{\widehat{p} - p}{\sqrt{\frac{\widehat{p}(1-\widehat{p})}{n}}} \xrightarrow{d} N(0, 1) \text{ as } n \to \infty
+\end{equation}
+Then letting $z_{q}$ be the $q$ quantile (or $100\cdot q^{th}$ percentile) of the standard normal distribution, we have
+\begin{equation}
+   \mathbb{P}\left(-z_{1-\alpha/2} \leq \frac{\widehat{p} - p}{\sqrt{\frac{\widehat{p}(1-\widehat{p})}{n}}} \leq z_{1-\alpha/2}\right) \approx 1 - \alpha
+\end{equation}
+Taking $\alpha = 0.05$, we have that $z_{0.975} \approx 1.96$. And then
+\begin{equation}
+   \mathbb{P}\left(-1.96 \leq \frac{\widehat{p} - p}{\sqrt{\frac{\widehat{p}(1-\widehat{p})}{n}}} \leq 1.96\right) \approx 0.95
+\end{equation}
+Rearranging, we get a 95\% confidence interval for $p$:
+\begin{equation}
+   \mathbb{P}\left(\widehat{p} - 1.96\sqrt{\frac{\widehat{p}(1-\widehat{p})}{n}} \leq p \leq \widehat{p} + 1.96\sqrt{\frac{\widehat{p}(1-\widehat{p})}{n}}\right) \approx 0.95
+\end{equation}
+This is known as the 95\% \textbf{Wald} Confidence Interval for the Binomial parameter $p$. We give a more general formulation below:
+\begin{definition}[Wald Confidence Interval for $p$]\label{def:wald-ci}
+   The $(1-\alpha)\cdot 100\%$ Wald Confidence Interval for the Binomial parameter $p$ is given by
+   \begin{equation}
+      \widehat{p} \pm z_{1-\alpha/2} \sqrt{\frac{\widehat{p}(1-\widehat{p})}{n}}
+   \end{equation}
+\end{definition}
+
+\subsection{M\&M's Example}
+
+Now suppose you buy an M\&M's bag with 56 M\&M's, 14 of which are blue. Supposing the color of each M\&M is independently drawn from some distribution, what is a 95\% confidence interval for $p_{\text{blue}}$ the probability the company makes an M\&M blue?
+
+Here, we have $n = 56$ and $\widehat{p}_{\text{blue}} = \frac{\text{number of blue M\&M's}}{\text{total number of M\&M's}} = \frac{14}{56} = 0.25$. Then the 95\% Wald Confidence Interval for $p_{\text{blue}}$ is given by
+\begin{align*}
+   \widehat{p}_{\text{blue}} \pm z_{0.975} \sqrt{\frac{\widehat{p}_{\text{blue}}(1-\widehat{p}_{\text{blue}})}{n}} &= 0.25 \pm 1.96 \sqrt{\frac{0.25\left(1-0.25\right)}{56}} \\
+   &= 0.25 \pm 0.1134 \text{, or } [0.1366, 0.3634]
+\end{align*}
+This interval is symmetric about $\widehat{p}_{\text{blue}} = 0.25$ and has length $2 \times 0.1134 = 0.2268$: a fairly wide interval! What happens if we were to observe the same proportion of blue M\&M's, but with a larger sample size? Let $n = 400$ and $\widehat{p}_{\text{blue}} = 0.25$. Then the 95\% Wald Confidence Interval for $p_{\text{blue}}$ is given by
+\begin{align*}
+   \widehat{p}_{\text{blue}} \pm z_{0.975} \sqrt{\frac{\widehat{p}_{\text{blue}}(1-\widehat{p}_{\text{blue}})}{n}} &= 0.25 \pm 1.96 \sqrt{\frac{0.25\left(1-0.25\right)}{400}} \\
+   &= 0.25 \pm 0.0424 \text{, or } [0.2076, 0.2924]
+\end{align*}
+This interval is much narrower than the previous one, with a length of only $2 \times 0.0424 = 0.0848$. In general, the width of the confidence interval scales with $O(n^{-1/2})$. We will now move on to interpreting the confidence interval.
+
+\section{Interpreting the Confidence Interval}
+
+\subsection{Frequentist Interpretation}
+
+In the previous section, we used the CLT to construct the Wald Confidence Interval in Definition~\ref{def:wald-ci}. We know from this that
+\begin{equation}
+   \mathbb{P}\left(\widehat{p} - z_{1-\alpha/2} \sqrt{\frac{\widehat{p}(1-\widehat{p})}{n}} \leq p \leq \widehat{p} + z_{1-\alpha/2} \sqrt{\frac{\widehat{p}(1-\widehat{p})}{n}}\right) \approx 1 - \alpha
+\end{equation}
+but what does this probability actually mean? Under the model
+\begin{align*}
+   S_n &= \sum_{i=1}^n X_i \sim \text{Binomial}(n, p) \\
+   X_i &\stackrel{\text{i.i.d.}}{\sim} \text{Bernoulli}(p)
+\end{align*}
+$p$ is an \textbf{unknown, fixed constant}. This is known as a \textbf{frequentist interpretation} of the parameter. What are the implications of this setup? Since $p$ is fixed, the probability that the confidence interval contains $p$ is \textit{actually} either 0 or 1. So what does the probability from our confidence interval actually mean?
+
+\subsection{The Confidence Interval as a Random Variable}
+Believe it or not, \textbf{the confidence interval itself is a random variable}. Why? It depends on $\widehat{p}$, which depends on random variables $\{X_i\}_{i=1}^n$ through $S_n$. So the confidence interval is a random variable, and the probability that the confidence interval contains $p$ is the probability that this random interval contains the fixed parameter $p$.
+
+If we repeated the experiment many times, in each replication $p$ remains the same, but the data $\{X_i\}_{i=1}^n$ changes by randomness, and by extension $\widehat{p}$ and the CI's also change. However, at our specified $\alpha$ level, we expect the CI to contain $p$ in 100(1 - $\alpha$)\% of the replications.
+
+\subsection{Coverage}
+
+\begin{definition}[Coverage]
+   The coverage of a confidence interval is the probability that the confidence interval contains the true parameter. Letting $\theta$ be the true parameter,
+   \begin{equation}
+      \text{Coverage} = \mathbb{P}\left(\theta \in CI\right)
+   \end{equation}
+\end{definition}
+
+The Wald Confidence Interval is based on 2 approximations:
+\begin{enumerate}
+   \item That $\mathbb{P}\left(p - z_{1-\alpha/2} \sqrt{\frac{p(1-p)}{n}} \leq p \leq p + z_{1-\alpha/2} \sqrt{\frac{p(1-p)}{n}}\right) \approx 1 - \alpha$ by the CLT
+   \item That we can plug in $\widehat{p}$ for $p$ in $\sigma = \sqrt{\frac{p (1-p)}{n}}$
+\end{enumerate}
+
+Because of these approximations, the \color{blue} actual \color{black} coverage of the 100(1 - $\alpha$)\% Wald Confidence Interval can be quite far below the \color{blue} nominal \color{black} coverage of 100(1 - $\alpha$)\% as shown by simulations and computations (Brown, Cai, Dasgupta, 2001). When does this happen?
+
+If $n$ is several hundred or thousand and/or $p$ is close to 0.5, the Wald interval is generally \color{blue} tolerably \color{black} accurate. However, if $n$ is smaller or $p$ is close to 0 or 1, the Wald interval can be quite inaccurate. To correct for this, Agresti and Coull (1998) recommend introducing \color{blue} 2 artificial successes and failures \color{black} into the data before computing $\widehat{p}$, which is known as the \textbf{Agresti-Coull Interval}. We define this interval below.
+\begin{definition}[Agresti-Coull Interval]
+   The $(1-\alpha)\cdot 100\%$ Agresti-Coull Interval for the Binomial parameter $p$ is given by
+   \begin{equation}
+      \widehat{p} \pm z_{1-\alpha/2} \sqrt{\frac{\widehat{p}'(1-\widehat{p}')}{n + 4}}, \text{ where } \widehat{p}' = \frac{S_n + 2}{n + 4}
+   \end{equation}
+\end{definition}
+In many cases, the Agresti-Coull interval achieves much better coverage than the Wald interval. This is pictured in Figure \ref{fig:wald-vs-agresti-coull}, where the Agresti-Coull interval outperforms the Wald interval whenever $p$ is even moderately far from 0.5.
+
+\begin{figure}[H]
+   \centering
+   \includegraphics[width=0.8\textwidth]{figures/8_wald-vs-agresti-coull.png}
+   \caption{Coverage of 95\% Wald vs. Agresti-Coull Confidence Intervals}
+   \label{fig:wald-vs-agresti-coull}
+\end{figure}
+
+\section*{References}
+\beginrefs
+\bibentry{AC}{Agresti, A., \& Coull, B.A.},
+{\it \href{http://dx.doi.org/10.1080/00031305.1998.10480550}{Approximate is Better than "Exact" for Interval Estimation of Binomial Proportions}},
+{The American Statistician},
+{1998}.
+
+\bibentry{BCD}{Brown, T.C., Cai, T.T., \& Dasgupta, A.},
+{\it \href{http://www.jstor.org/stable/2676784}{Interval Estimation for a Binomial Proportion}},
+{Statistical Science},
+{2001}.
+
+\endrefs
+
+\end{document}
