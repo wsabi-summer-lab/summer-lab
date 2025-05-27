@@ -9,7 +9,8 @@ internal
 ### FILES ###
 #############
 
-template.*
+template*
+*.tex
 
 ##############
 ### PYTHON ###
