@@ -13,11 +13,11 @@ setwd("filepath")
 ##############
 
 # load data
-mlb_team_seasons = read_csv("mlb_team_seasons.csv")
+mlb_team_seasons = read_csv("02_mlb-team-seasons.csv")
 
 ##############
 ### PART 2 ###
 ##############
 
 # load data
-mlb_payrolls = read_csv("mlb_payrolls.csv")
+mlb_payrolls = read_csv("02_mlb-payrolls.csv")
