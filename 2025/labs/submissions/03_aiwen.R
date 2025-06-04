@@ -2,12 +2,13 @@
 ### SETUP ###
 #############
 
+rm(list=ls())
 # install.packages(c("ggplot2", "tidyverse"))
 library(ggplot2)
 library(tidyverse)
 
 # set working directory to wherever your data is
-setwd("filepath")
+# setwd("filepath")
 
 ##############
 ### PART 1 ###
