@@ -104,27 +104,24 @@ summary(model_punts)
 
 punts$pred_ydl = predict(model_punts, newdata = punts)
 punts %>% filter(pq > 0.5) %>% 
-  ggplot(aes(x = next_ydl)) +
+  ggplot(aes(x = ydl)) +
   geom_point(aes(y = pred_ydl)) +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
-  labs(title = "Predicted vs Actual Next ydl (pq > 0.5)",
-       x = "Next ydl",
+  labs(title = "Predicted vs Actual ydl (pq > 0.5)",
+       x = "ydl",
        y = "Predicted ydl")
 
 punts %>% filter(pq <= 0.5 & pq >= 0) %>% 
-  ggplot(aes(x = next_ydl)) +
+  ggplot(aes(x = ydl)) +
   geom_point(aes(y = pred_ydl)) +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
-  labs(title = "Predicted vs Actual Next ydl (0 <= pq <= 0.5)",
-       x = "Next ydl",
+  labs(title = "Predicted vs Actual ydl (0 <= pq <= 0.5)",
+       x = "ydl",
        y = "Predicted ydl")
 
 punts %>% filter(pq < 0) %>% 
-  ggplot(aes(x = next_ydl)) +
+  ggplot(aes(x = ydl)) +
   geom_point(aes(y = pred_ydl)) +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
-  labs(title = "Predicted vs Actual Next ydl (pq < 0)",
-       x = "Next ydl",
+  labs(title = "Predicted vs Actual ydl (pq < 0)",
+       x = "ydl",
        y = "Predicted ydl")
 
 punts %>% mutate(pyoe = next_ydl - pred_ydl) %>% 
