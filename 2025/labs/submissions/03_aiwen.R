@@ -16,6 +16,11 @@ library(tidyverse)
 
 # load data
 mlb_team_seasons = read_csv("../data/03_nba-four-factors.csv")
+names(mlb_team_seasons)
+
+mlb_team_seasons <- mlb_team_seasons %>% 
+  # mutate(x1 = "EFG%" - "OPP EFG%") %>% 
+  mutate()
 
 ##############
 ### PART 2 ###
