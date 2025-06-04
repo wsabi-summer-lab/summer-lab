@@ -1,0 +1,301 @@
+---
+title: "03_Maximilian"
+author: "Maximilian J. Gebauer"
+date: "2025-06-04"
+output: html_document
+---
+
+```{r Setup, include=FALSE, results='hide', warning=FALSE}
+knitr::opts_chunk$set(echo = T, fig.width=8, fig.height=4)
+options(scipen = 0, digits = 3)  # controls base R output
+
+# Package setup
+if(!require("pacman")) install.packages("pacman")
+
+pacman::p_load(tidyverse, dplyr, ggthemes, data.table, lubridate, glmnet,
+               GGally, RColorBrewer, ggsci, plotROC, usmap,
+               plotly, ggpubr, vistime, coefplot, skimr, car, ggrepel, slider, lubridate,
+               tidymodels,ranger,vip,ggplot2, tune,dials,pdp, purrr, stringr, lmtest,
+               sandwich, Lahman)
+```
+
+```{r}
+mlb_team_seasons <- read_csv("../data/03_nba-four-factors.csv")
+```
+
+```{r}
+nba4 <- mlb_team_seasons
+```
+
+```{r}
+nba_mod <- nba4
+
+nba_mod <- nba_mod %>%
+  mutate(
+    x1 = `EFG%` - `OPP EFG%`,
+    x2 = `OREB%` - `DREB%`,
+    x3 = `TOV%` - `OPP TOV %`,
+    x4 = `FT Rate` - `OPP FT Rate`
+  ) %>%
+  dplyr::select(W,x1,x2,x3,x4,TEAM,Team_Season)
+```
+
+```{r}
+nba_mod %>%
+  select(x1,x2,x3,x4,W) %>%
+  summary()
+
+nba_mod %>%
+  select(x1,x2,x3,x4,W) %>%
+  apply(2,sd)
+```
+
+```{r,warning=FALSE,message=FALSE,fig.width=10,fig.height=6}
+ggplot(nba_mod, aes(x=x1)) +
+  geom_histogram(fill="steelblue",color="white") +
+  theme_minimal() +
+  labs(
+    title = "Marginal Distribution of Effective FG % - Opponent Effective FG %",
+    x = "Effective FG % - Opponent Effective FG %",
+    y = "Count"
+  ) + theme(
+    plot.title = element_text(hjust = .5, size = 16)
+  )
+
+ggplot(nba_mod, aes(x=x2)) +
+  geom_histogram(fill="steelblue",color="white") +
+  theme_minimal() +
+  labs(
+    title = "Marginal Distribution of Offensive Rebound % - Defensive Rebound %",
+    x = "Offensive Rebound % - Defensive Rebound %",
+    y = "Count"
+  ) + theme(
+    plot.title = element_text(hjust = .5, size = 16)
+  )
+
+ggplot(nba_mod, aes(x=x3)) +
+  geom_histogram(fill="steelblue",color="white") +
+  theme_minimal() +
+  labs(
+    title = "Marginal Distribution of Turnover % - Opponent Turnover %",
+    x = "Turnover % - Opponent Turnover %",
+    y = "Count"
+  ) + theme(
+    plot.title = element_text(hjust = .5, size = 16)
+  )
+
+ggplot(nba_mod, aes(x=x4)) +
+  geom_histogram(fill="steelblue",color="white") +
+  theme_minimal() +
+  labs(
+    title = "Marginal Distribution of Free Throw Rate - Opponent Free Throw Rate",
+    x = "Free Throw Rate - Opponent Free Throw Rate",
+    y = "Count"
+  ) + theme(
+    plot.title = element_text(hjust = .5, size = 16)
+  )
+
+ggplot(nba_mod, aes(x=W)) +
+  geom_histogram(fill="steelblue",color="white") +
+  theme_minimal() +
+  labs(
+    title = "Marginal Distribution of Season Win Totals",
+    x = "Season Win Total",
+    y = "Count"
+  ) + theme(
+    plot.title = element_text(hjust = .5, size = 16)
+  )
+```
+
+```{r}
+nba_mod %>%
+  select(x1,x2,x3,x4,W) %>%
+  cor() %>%
+  corrplot::corrplot(type = 'lower', addCoef.col = 'red')
+```
+
+```{r}
+model1 <- lm(W~x1+x2+x3+x4,data=nba_mod)
+summary(model1)
+```
+
+```{r}
+nba_sc <- nba_mod
+
+nba_sc <- nba_sc %>%
+  mutate(
+  x1_stan = (x1 - mean(x1)) / sd(x1),
+  x2_stan = (x2 - mean(x2)) / sd(x2),
+  x3_stan = (x3 - mean(x3)) / sd(x3),
+  x4_stan = (x4 - mean(x4)) / sd(x4),
+  )
+```
+
+```{r}
+model2 <- lm(W~x1_stan+x2_stan+x3_stan+x4_stan,data=nba_sc)
+summary(model2)
+```
+
+3. Model 2 with the features standerdized is more immediately informative for assessing the realtive importance of the four factors for predicting wins as the units are commensurable across coefficient estimates, meaning a feature with a larger absolute value coefficient estimate is inferred to be more important for predicting the response than a feature with a smaller absolute value for the coefficient. Model 1 lacks this interpretability as the scales of the features are non-constant, meaning a larger coefficient estimate for a feature need not imply that said feature is more important for prediction than another.
+
+```{r}
+set.seed(321)
+n <- nrow(nba_sc)
+
+train_prop <- .8
+train_size <- .8 * n
+
+train_indices <- sample(n,train_size,replace = F)
+
+train_data <- nba_sc[train_indices, ]
+
+test_data <- setdiff(nba_sc,train_data)
+```
+
+```{r}
+model_raw <- lm(W~x1+x2+x3+x4,data=train_data)
+model_stan <- lm(W~x1_stan+x2_stan+x3_stan+x4_stan,data=train_data)
+```
+
+```{r}
+model_raw_test <- predict(model_raw,test_data)
+model_stan_test <- predict(model_stan,test_data)
+```
+
+```{r}
+raw_test_resid <- (test_data$W - model_raw_test)
+stan_test_resid <- (test_data$W - model_stan_test)
+```
+
+
+As seen below, the rmse are equivalent for the two models. This is expected given that we performed a linear transformation on the features and the conditional expectation of the response on the predictors is invariant under this class of transformations.
+
+
+```{r}
+(rmse_raw <- sqrt(mean(raw_test_resid^2)))
+(rmse_stan <- sqrt(mean(stan_test_resid^2)))
+```
+
+
+```{r}
+punts <- read_csv("../data/03_punts.csv")
+punts$punter <- as.factor(punts$punter)
+```
+
+```{r}
+set.seed(321)
+n <- nrow(punts)
+
+train_prop <- .8
+train_size <- .8 * n
+
+train_indices <- sample(n,train_size,replace = F)
+
+train_data <- punts[train_indices, ]
+
+test_data <- setdiff(punts,train_data)
+```
+
+```{r}
+model_p1 <- lm(next_ydl ~ ydl + pq, data = train_data)
+model_p2 <- lm(next_ydl ~ ydl + I(ydl^2) + pq + I(pq^2), data = train_data)
+model_p3 <- lm(next_ydl ~ ydl + I(ydl^2) + I(ydl^3) + pq + I(pq^2) + I(pq^3), data = train_data)
+model_p4 <- lm(next_ydl ~ splines::bs(ydl,df=7,degree=3) + splines::bs(pq,df=7,degree=3), data = train_data)
+```
+
+```{r}
+model_p1_test <- predict(model_p1,test_data)
+model_p2_test <- predict(model_p2,test_data)
+model_p3_test <- predict(model_p3,test_data)
+model_p4_test <- predict(model_p4,test_data)
+```
+
+```{r}
+p1_resid <- (test_data$next_ydl - model_p1_test)
+p2_resid <- (test_data$next_ydl - model_p2_test)
+p3_resid <- (test_data$next_ydl - model_p3_test)
+p4_resid <- (test_data$next_ydl - model_p4_test)
+```
+
+```{r}
+options(digits=5)
+(rmse_p1 <- sqrt(mean(p1_resid^2)))
+(rmse_p2 <- sqrt(mean(p2_resid^2)))
+(rmse_p3 <- sqrt(mean(p3_resid^2)))
+(rmse_p4 <- sqrt(mean(p4_resid^2)))
+```
+
+We compute the rmse for the four models on the held-out test set, and find rmse is lowest with our bspline model, so we select it and refit on the full data set.
+
+
+```{r}
+final_model <- lm(next_ydl ~ splines::bs(ydl,df=7,degree=3) + splines::bs(pq,df=7,degree=3), data = punts)
+```
+
+
+```{r}
+
+spline_data <- punts
+
+spline_data <- spline_data %>%
+  mutate(
+    y_hat = final_model$fitted.values,
+    resids = final_model$residuals
+  )
+```
+
+```{r}
+q1 <- quantile(spline_data$pq,probs = .25)
+q2 <- quantile(spline_data$pq,probs = .50)
+q3 <- quantile(spline_data$pq,probs = .75)
+```
+
+Below we provide plots of predicted values by initial yardline, facted by punter quality quartile.
+
+```{r}
+spline_data %>%
+  filter(pq < q1) %>%
+  ggplot(aes(x=ydl,y=y_hat)) +
+  geom_point() +
+  theme_minimal()
+
+spline_data %>%
+  filter(pq > q1 & pq < q2) %>%
+  ggplot(aes(x=ydl,y=y_hat)) +
+  geom_point() +
+  theme_minimal()
+
+spline_data %>%
+  filter(pq > q2 & pq < q3) %>%
+  ggplot(aes(x=ydl,y=y_hat)) +
+  geom_point() +
+  theme_minimal()
+
+spline_data %>%
+  filter(pq > q3) %>%
+  ggplot(aes(x=ydl,y=y_hat)) +
+  geom_point() +
+  theme_minimal()
+```
+
+Below we provide the top 20 performing punters where performance is measured as the average model residual for the i-th punter. 
+
+```{r,warning=FALSE,message=FALSE,fig.width=10,fig.height=6}
+avg_resid <- spline_data %>%
+  group_by(punter) %>%
+  summarise(mean_resid = mean(resids, na.rm = TRUE)) %>%
+  slice_max(mean_resid, n = 20) %>%
+  arrange(-desc(mean_resid))
+
+avg_resid <- avg_resid %>%
+  mutate(punter = factor(punter, levels = punter))
+
+ggplot(avg_resid, aes(x = punter, y = mean_resid)) +
+  geom_col() +
+  coord_flip() +
+  labs(x = "Punter", y = "Average Residual", title = "Average Residuals by Punter") +
+  theme_minimal()
+```
+
+
+
