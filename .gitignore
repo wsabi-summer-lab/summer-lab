@@ -11,6 +11,7 @@ internal
 
 template*
 *.tex
+*.DS_Store
 
 ##############
 ### PYTHON ###
