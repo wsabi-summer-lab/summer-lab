@@ -1,0 +1,431 @@
+---
+title: "Exploring Data"
+subtitle: "Into the tidyverse"
+date: "June 4th, 2025"
+output:
+  xaringan::moon_reader:
+    lib_dir: "libs"
+    # chakra: "libs/remark-latest.min.js"
+    # css: ["default", "css/ath-slides.css", "css/ath-inferno-fonts.css", "css/animate.css"]
+    self-contained: yes
+    # css: [default, default-fonts]
+    # seal: false
+    # anchor_sections: false
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+      ratio: "16:9"
+      navigation:
+        scroll: false
+editor_options:
+  chunk_output_type: console
+---
+
+```{r xaringan-themer, include=FALSE, warning=FALSE}
+library(xaringanthemer)
+style_mono_accent(base_color = "#cc002b")
+```
+
+```{r setup, echo = FALSE}
+knitr::opts_chunk$set(fig.retina = 3, warning = FALSE, message = FALSE)
+```
+
+## Data Science workflow
+
+According to [Hadley Wickham](http://hadley.nz/) in [`R` for Data Science](https://r4ds.had.co.nz/):
+
+.center[![](https://d33wubrfki0l68.cloudfront.net/571b056757d68e6df81a3e3853f54d3c76ad6efc/32d37/diagrams/data-science.png)]
+
+--
+
+Aspects of data __wrangling__:
+
+--
+- __import__: reading in data (e.g. `read_csv()`)
+
+
+--
+- __tidy__: rows = observations, columns = variables (i.e. __tabular__ data)
+
+
+--
+- __transform__: filter observations, create new variables, summarize, etc.
+
+
+---
+
+## What is Exploratory Data Analysis (EDA)?
+
+--
+_(broadly speaking)_ EDA = questions about data + wrangling + visualization 
+
+
+--
+[`R` for Data Science](https://r4ds.had.co.nz/): _"EDA is a state of mind"_, an iterative cycle:
+
+- generate questions
+
+- answer via transformations and visualizations
+
+
+--
+Example of questions?
+
+--
+- What type of __variation__ do the variables display?
+
+
+- What type of __relationships__ exist between variables?
+
+
+--
+
+__Goal__: develop understanding and become familiar with your data
+
+
+--
+
+EDA is __NOT__ a replacement for statistical inference and learning
+
+EDA is an __important__ and __necessary__ step to build intuition
+
+
+--
+Now for an example...
+
+---
+
+## Exploring MLB batting statistics 
+
+__Import__ `Batting` table of historical MLB statistics from the [`Lahman` package](https://cran.r-project.org/web/packages/Lahman/index.html), explore using the [`tidyverse`](https://www.tidyverse.org/)
+
+```{r load-batting, warning = FALSE, message = FALSE}
+library(tidyverse) # Load the tidyverse suite of packages
+library(Lahman) # Load the Lahman package to access its datasets
+Batting <- as_tibble(Batting) # Initialize the Batting dataset
+```
+
+
+--
+Basic info about the `Batting` dataset:
+```{r batting-info}
+dim(Batting) # displays same info as c(nrow(Batting), ncol(Batting))
+class(Batting)
+```
+
+
+--
+`tbl` (pronounced `tibble`) is the `tidyverse` way of storing tabular data, like a spreadsheet or `data.frame`
+
+
+---
+
+__Always look at your data__: view the first 6 (by default) rows with `head()`
+
+```{r batting-head}
+head(Batting) # Try just typing Batting into your console, what happens?
+```
+
+
+Is our `Batting` dataset __tidy__?
+--
+
+- Each row = a player's season stint with a team (i.e. players can play for multiple teams in year)
+
+- Each column = different measurement or recording about the player-team-season observation (can print out column names directly with `colnames(Batting)` or `names(Batting)`)
+
+
+--
+__Can we explore how baseball has changed over time with `Batting`?__
+
+---
+
+## Let the data wrangling begin...
+
+__Summarize__ _continuous_ (e.g. `yearID`, `AB`) and _categorical_ (e.g. `teamID`, `lgID`) variables in different ways
+
+--
+
+Compute __summary statistics__ for _continuous_ variables with the `summary()` function:
+
+```{r batting-year-summary}
+summary(Batting$yearID)
+```
+
+--
+
+Compute __counts__ of _categorical_ variables with `table()` function:
+
+```{r batting-league-summary}
+table("Leagues" = Batting$lgID) # be careful it ignores NA values!
+```
+
+--
+
+_How do we remove the other leagues?_
+
+---
+
+[`dplyr`](https://dplyr.tidyverse.org/) is a package within the `tidyverse` with functions for data wrangling
+
+_"Grammar of data manipulation"_: `dplyr` functions are __verbs__, datasets are __nouns__
+
+--
+
+- __We can [`filter()`](https://dplyr.tidyverse.org/reference/filter.html) our dataset to choose observations meeting conditions__
+```{r filter-batting}
+mlb_batting <- filter(Batting, lgID %in% c("AL", "NL"))
+nrow(Batting) - nrow(mlb_batting) # Difference in rows
+```
+
+--
+
+- __We can [`select()`](https://dplyr.tidyverse.org/reference/select.html) variables of interest__
+```{r select-batting}
+sel_batting <- select(Batting, yearID, lgID, G, AB, R, H, HR, BB, SO)
+head(sel_batting, n = 3)
+```
+
+---
+
+- __We can [`arrange()`](https://dplyr.tidyverse.org/reference/arrange.html) our dataset to sort observations by variables__
+```{r arrange-batting}
+hr_batting <- arrange(Batting, desc(HR)) # use desc() for descending order
+head(hr_batting, n = 3)
+```
+
+--
+
+- __We can [`summarize()`](https://dplyr.tidyverse.org/reference/summarise.html) our dataset to one row based on functions of variables__
+```{r summarize-batting}
+summarize(Batting, max(stint), median(AB))
+```
+
+---
+
+- __We can [`mutate()`](https://dplyr.tidyverse.org/reference/mutate.html) our dataset to create new variables__ (mutate is a weird name...)
+```{r mutate-batting}
+new_batting <- mutate(Batting, batting_avg = H / AB, so_to_bb = SO / BB)
+head(new_batting, n = 1)
+```
+
+--
+
+How do we perform several of these actions?
+
+```{r nested-batting}
+head(arrange(select(mutate(Batting, BA = H / AB), playerID, BA), desc(BA)), n = 1)
+```
+
+That's awfully annoying to do, and also difficult to read...
+
+---
+
+## Enter the pipeline
+
+The `%>%` (_pipe_) operator is used in the `tidyverse` (from [`magrittr`](https://magrittr.tidyverse.org/articles/magrittr.html)) to chain commands together 
+
+`%>%` directs the __data analyis pipeline__: output of one function pipes into input of the next function
+
+```{r batting-pipeline, tidy = FALSE}
+Batting %>%
+  filter(lgID %in% c("AL", "NL"),
+         AB > 300) %>%
+  mutate(batting_avg = H / AB) %>%
+  arrange(desc(batting_avg)) %>%
+  select(playerID, yearID, batting_avg) %>%
+  head(n = 5)
+```
+
+---
+
+## More pipeline actions!
+
+Instead of `head()`, __we can [`slice()`](https://dplyr.tidyverse.org/reference/slice.html) our dataset to choose the observations based on the position__
+
+```{r slice-batting, tidy = FALSE}
+Batting %>%
+  filter(lgID %in% c("AL", "NL"),
+         AB > 300) %>%
+  mutate(so_to_bb = SO / BB) %>%
+  arrange(so_to_bb) %>%
+  select(playerID, yearID, so_to_bb) %>%
+  slice(c(1, 2, 10, 100))
+```
+
+
+---
+
+## Grouped operations
+
+__We [`group_by()`](https://dplyr.tidyverse.org/reference/group_by.html) to split our dataset into groups based on a variable's values__
+
+```{r batting-year-groups, tidy = FALSE}
+Batting %>%
+  filter(lgID %in% c("AL", "NL")) %>%
+  group_by(yearID) %>%
+  summarize(hr = sum(HR), so = sum(SO), bb = sum(BB)) %>%
+  arrange(desc(hr)) %>%
+  slice(1:5)
+```
+
+`group_by()` is only useful in a pipeline (e.g. with `summarize()`), and pay attention to its behavior 
+
+`ungroup()` can solve your problems afterwards
+
+---
+
+## Putting it all together...
+
+We'll create a __tidy__ dataset where each row = a year with the following variables:
+
+- total HRs (homeruns), SOs (strikeouts), and BBs (walks)
+- year's BA = total H / total AB
+- only want AL and NL leagues
+
+```{r tidy-year-batting}
+year_batting_summary <- Batting %>%
+  filter(lgID %in% c("AL", "NL")) %>%
+  group_by(yearID) %>%
+  summarize(total_hits = sum(H, na.rm = TRUE),
+            total_hrs = sum(HR, na.rm = TRUE),
+            total_sos = sum(SO, na.rm = TRUE),
+            total_walks = sum(BB, na.rm = TRUE),
+            total_atbats = sum(AB, na.rm = TRUE)) %>%
+  mutate(batting_avg = total_hits / total_atbats)
+head(year_batting_summary, n = 2)
+```
+
+
+---
+
+Top three years with the most HRs?
+
+--
+```{r top-three-hrs}
+year_batting_summary %>%
+  arrange(desc(total_hrs)) %>%
+  slice(1:3)
+```
+
+
+--
+Top three years with highest batting average?
+
+--
+```{r top-three-ba}
+year_batting_summary %>%
+  arrange(desc(batting_avg)) %>%
+  slice(1:3)
+```
+
+
+---
+
+Best and worst strikeout to walk ratios?
+--
+```{r best-worst-so-to-bb}
+year_batting_summary %>%
+  mutate(so_to_bb = total_sos / total_walks) %>%
+  arrange(so_to_bb) %>%
+  slice(c(1, n()))
+```
+
+--
+_We can make better looking tables..._
+
+--
+__[`rename()`](https://dplyr.tidyverse.org/reference/select.html) variables in our dataset__
+```{r rename-year-batting}
+year_batting_summary %>%
+  select(yearID, batting_avg) %>%
+  rename(Year = yearID, `Batting AVG` = batting_avg) %>%
+  slice(c(1, n()))
+```
+
+---
+
+## Grammar of tables preview
+
+We can go one step further - __and use the new [`gt`](https://gt.rstudio.com/articles/intro-creating-gt-tables.html) package__ to create a nice-looking table for presentation
+
+.pull-left[
+
+
+```{r year-batting-gt, warning = FALSE, message = FALSE, eval = FALSE}
+library(gt)
+year_batting_summary %>%
+  select(yearID, batting_avg) %>%
+  rename(Year = yearID, 
+         `Batting AVG` = batting_avg) %>%
+  arrange(desc(`Batting AVG`)) %>%
+  slice(c(1:3, (n()-2):n())) %>%
+  gt() %>%
+  tab_header(
+    title = "Best / worst MLB Seasons by AVG",
+    subtitle = "Top / bottom three are presented"
+  )
+```
+]
+
+.pull-right[
+
+```{r, ref.label= 'year-batting-gt', eval=T, echo = F}
+
+```
+]
+
+
+
+_Note the `gt` display is different in these slides due to the [`xaringan`](https://github.com/yihui/xaringan) package formatting_
+
+
+--
+__Enough with tables!__
+
+
+---
+
+## Data visualization
+
+.pull-left[
+
+_"The simple graph has brought more information to the data analyst’s mind than any other device."_ — Tukey
+
+
+- __TOMORROW__: the __grammar of graphics__
+
+- Use [`ggplot2`](https://ggplot2.tidyverse.org/) to visually explore our data
+
+- More intuitive than base `R` plotting! 
+
+- Will walkthrough different types of visualizations for 1D, 2D, continuous, categorical, facetting, etc. 
+
+- `tidyverse` verbs and `%>%` leads to natural pipeline for EDA
+]
+
+.pull-right[
+
+```{r year-batting-plot, echo = FALSE, fig.retina = 3}
+year_batting_summary %>%
+  select(yearID, total_hrs, total_sos, total_walks) %>%
+  rename(HRs = total_hrs, Strikeouts = total_sos,
+         Walks = total_walks) %>%
+  pivot_longer(HRs:Walks,
+               names_to = "stat", 
+               values_to = "value") %>%
+  ggplot(aes(x = yearID, y = value)) +
+  geom_line(color = "darkblue") +
+  geom_point(alpha = 0.8, color = "darkblue") +
+  facet_wrap(~ stat, scales = "free_y", ncol = 1) +
+  labs(x = "Year", y = "Total of statistic",
+       title = "The rise of MLB's three true outcomes",
+       caption = "Data courtesy of Lahman") +
+  theme_bw() +
+  theme(strip.background = element_blank())
+```
+
+]
+
+

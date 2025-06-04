@@ -1,0 +1,649 @@
+---
+title: "Data Visualization"
+subtitle: "Density estimation"
+date: "June 4th, 2025"
+output:
+  xaringan::moon_reader:
+    lib_dir: "libs"
+    # chakra: "libs/remark-latest.min.js"
+    # css: ["default", "css/ath-slides.css", "css/ath-inferno-fonts.css", "css/animate.css"]
+    self-contained: yes
+    # css: [default, default-fonts]
+    # seal: false
+    # anchor_sections: false
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+      ratio: "16:9"
+      navigation:
+        scroll: false
+editor_options:
+  chunk_output_type: console
+---
+
+```{r xaringan-themer, include=FALSE, warning=FALSE}
+library(xaringanthemer)
+style_mono_accent(base_color = "#cc002b")
+```
+
+```{r setup, echo = FALSE}
+knitr::opts_chunk$set(fig.retina = 3, warning = FALSE, message = FALSE)
+```
+
+## New dataset - Stephen Curry's shots
+
+Created dataset of shot attempts by the Stephen Curry in 2021-2022 season using [`nbastatR`](http://asbcllc.com/nbastatR/)
+
+```{r load-curry, warning = FALSE, message = FALSE}
+library(tidyverse)
+curry_shots <- 
+  read_csv("https://shorturl.at/xFI18")
+head(curry_shots)
+```
+
+- each row / observation is a shot attempt by Curry in the 2021 season
+- __Categorical__ / qualitative variables: `is_shot_made`, `fg_type`, `shot_zone`, `shot_type`
+- __Continuous__ / quantitative variables: `shot_x`, `shot_y`, `shot_distance`
+
+---
+
+## Back to [histograms](https://ggplot2.tidyverse.org/reference/geom_histogram.html)...
+
+--
+
+.pull-left[
+
+```{r shot-dist-hist, eval = FALSE}
+fd_bw <- 2 * IQR(curry_shots$shot_distance) / length(curry_shots$shot_distance)^(1/3)
+curry_shots %>%
+  ggplot(aes(x = shot_distance)) +
+  geom_histogram(binwidth = fd_bw) +
+  theme_bw()
+```
+
+- Split observed data into __bins__
+
+- __Count__ number of observations in each bin
+
+__Need to choose the number of bins__, adjust with:
+
+- `bins` - number of bins (default is 30)
+
+- `binwidth` - literally the width of bins (overrides `bins`), various [rules of thumb](https://en.wikipedia.org/wiki/Histogram)
+
+  - e.g., see `fd_bw` for [Freedman–Diaconis rule](https://en.wikipedia.org/wiki/Freedman%E2%80%93Diaconis_rule)
+
+- `breaks` - vector of bin boundaries (overrides both `bins` and `binwidth`)
+]
+
+.pull-right[
+```{r ref.label = 'shot-dist-hist', fig.height=6, echo = FALSE}
+
+```
+]
+
+---
+
+## Adjusting the bin width
+
+
+.pull-left[
+__Small__ `binwidth`  $\rightarrow$ _"undersmooth"_ / spiky
+
+```{r shot-dist-hist-small, fig.height=4}
+curry_shots %>%
+  ggplot(aes(x = shot_distance)) +
+  geom_histogram(binwidth = 1) + #<<
+  theme_bw()
+```
+
+
+]
+
+.pull-right[
+
+__Large__ `binwidth`  $\rightarrow$ _"oversmooth"_ / flat
+
+
+```{r shot-dist-hist-large, fig.height=4}
+curry_shots %>%
+  ggplot(aes(x = shot_distance)) +
+  geom_histogram(binwidth = 25) + #<<
+  theme_bw()
+```
+
+]
+
+__Try several approaches, the `R` / `ggplot2` default is NOT guaranteed to be an optimal choice__
+
+---
+
+### A subtle point about the histogram code...
+
+.pull-left[
+
+By default the bins are centered on the integers...
+
+- left-closed, right-open intervals 
+- starting at -0.5 to 0.5, 0.5 to 1.5, ...
+
+```{r ref.label='shot-dist-hist-small', fig.height=4}
+
+```
+
+]
+
+.pull-right[
+
+__Specify center of one bin__ (e.g. 0.5)
+
+- Reminder to use `closed = "left"`...
+
+```{r shot-dist-hist-shift, fig.height=4}
+curry_shots %>%
+  ggplot(aes(x = shot_distance)) +
+  geom_histogram(binwidth = 1, center = 0.5, #<<
+                 closed = "left") + #<<
+  theme_bw()
+```
+
+]
+
+---
+
+### How do histograms relate to the PDF and CDF?
+
+__Remember__: we use the __probability density function (PDF)__ to provide a __relative likelihood__
+
+--
+- PDF is the __derivative__ of the cumulative distribution function (CDF)
+
+
+--
+- Histograms approximate the PDF with bins, and __points are equally likely within a bin__
+
+.pull-left[
+```{r shot-dist-hist-left, echo = FALSE, fig.height=4}
+curry_shots %>%
+  ggplot(aes(x = shot_distance)) + 
+  geom_histogram(binwidth = 1, center = 0.5, 
+                 closed = "left") +
+  geom_rug(alpha = 0.3) +
+  theme_bw() +
+  labs(x = "Shot distance (in feet)",
+       y = "Number of shot attempts")
+```
+]
+.pull-right[
+```{r shot-dist-ecdf-right, echo = FALSE, fig.height=4}
+curry_shots %>%
+  ggplot(aes(x = shot_distance)) + 
+  stat_ecdf() +
+  geom_rug(alpha = 0.3) +
+  theme_bw() +
+  labs(x = "Shot distance (in feet)",
+       y = "Proportion of Curry shot attempts")
+```
+
+]
+
+
+--
+__What can say about the relative likelihood of data we have not observed?__
+
+- we want __non-zero density__ between our observations, e.g., just beyond 20 feet
+
+---
+
+## Kernel density estimation
+
+__Goal__: estimate the PDF $f(x)$ for all possible values (assuming it is continuous / smooth)
+
+--
+
+$$
+\text{Kernel density estimate: } \hat{f}(x) = \frac{1}{n} \sum_{i=1}^n \frac{1}{h} K_h(x - x_i)
+$$
+
+--
+- $n =$ sample size, $x =$ new point to estimate $f(x)$ (does NOT have to be in dataset!)
+
+
+--
+- $h =$ __bandwidth__, analogous to histogram bin width, ensures $\hat{f}(x)$ integrates to 1
+
+- $x_i =$ $i$th observation in dataset
+
+
+--
+- $K_h(x - x_i)$ is the __Kernel__ function, creates __weight__ given distance of $i$th observation from new point 
+  - as $|x - x_i| \rightarrow \infty$ then $K_h(x - x_i) \rightarrow 0$, i.e. further apart $i$th row is from $x$, smaller the weight
+  
+  - as __bandwidth__ $h \uparrow$ weights are more evenly spread out (as $h \downarrow$ more concentrated around $x$) 
+
+  - typically use [__Gaussian__ / Normal](https://en.wikipedia.org/wiki/Normal_distribution) kernel: $\propto e^{-(x - x_i)^2 / 2h^2}$
+  
+  - $K_h(x - x_i)$ is large when $x_i$ is close to $x$
+  
+
+---
+
+## [Wikipedia example](https://en.wikipedia.org/wiki/Kernel_density_estimation)
+
+.center[![](https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/Comparison_of_1D_histogram_and_KDE.png/1000px-Comparison_of_1D_histogram_and_KDE.png)]
+  
+---
+
+## How do we compute and display the density estimate?
+
+.pull-left[
+
+- We make __kernel density estimates__ with [`geom_density()`](https://ggplot2.tidyverse.org/reference/geom_density.html)
+
+```{r curve, eval = FALSE}
+curry_shots %>%
+  ggplot(aes(x = shot_distance)) + 
+  geom_density() + #<<
+  geom_rug(alpha = 0.3) +
+  theme_bw()
+```
+
+- __Pros__:
+  - Displays full shape of distribution
+  - Can easily layer
+  - Add categorical variable with color
+
+- __Cons__:
+  - Need to pick bandwidth and kernel...
+  
+]
+.pull-right[
+```{r ref.label = 'curve', echo = FALSE, fig.height=7}
+```
+]
+
+---
+
+## What about the bandwidth? See [Chapter 14 for more...](https://www.stat.cmu.edu/~cshalizi/ADAfaEPoV/)
+
+Use __Gaussian reference rule__ (_rule-of-thumb_) $\approx 1.06 \cdot \sigma \cdot n^{-1/5}$, where $\sigma$ is the observed standard deviation
+
+Modify the bandwidth using the `adjust` argument - __value to multiply default bandwidth by__
+
+.pull-left[
+```{r curve-noisy, fig.height=4}
+curry_shots %>%
+  ggplot(aes(x = shot_distance)) + 
+  geom_density(adjust = 0.5) + #<<
+  geom_rug(alpha = 0.3) + theme_bw()
+```
+
+  
+]
+.pull-right[
+```{r curve-smooth, fig.height=4}
+curry_shots %>%
+  ggplot(aes(x = shot_distance)) + 
+  geom_density(adjust = 2) + #<<
+  geom_rug(alpha = 0.3) + theme_bw()
+```
+]
+
+---
+
+## Use density curves and ECDFs together
+
+
+```{r shot-dist-curve-ecdf, echo = FALSE, fig.width=16, fig.align='center'}
+library(patchwork) #<<
+curry_shot_dens <- curry_shots %>%
+  ggplot(aes(x = shot_distance)) + 
+  geom_density() +
+  geom_rug(alpha = 0.3) +
+  theme_bw() +
+  labs(x = "Shot distance (in feet)",
+       y = "Number of shot attempts")
+curry_shot_ecdf <- curry_shots %>%
+  ggplot(aes(x = shot_distance)) + 
+  stat_ecdf() +
+  geom_rug(alpha = 0.3) +
+  theme_bw() +
+  labs(x = "Shot distance (in feet)",
+       y = "Proportion of Curry shot attempts")
+curry_shot_dens + curry_shot_ecdf #<<
+```
+
+---
+
+## Code interlude: easy way to arrange multiple figures
+
+Use the new [`patchwork`](https://patchwork.data-imaginist.com/index.html) package to easily arrange your plots (see also [`cowplot`](https://cran.r-project.org/web/packages/cowplot/vignettes/introduction.html))
+
+```{r ref.label='shot-dist-curve-ecdf', eval = FALSE}
+
+```
+
+
+---
+
+## Use density curves and ECDFs together
+
+```{r shot-dist-curve-ecdf-color, echo = FALSE, fig.width=16, fig.align='center'}
+curry_shot_dens_made <- curry_shots %>%
+  ggplot(aes(x = shot_distance, 
+             color = is_shot_made)) + 
+  geom_density() +
+  geom_rug(alpha = 0.3) +
+  theme_bw() +
+  labs(x = "Shot distance (in feet)",
+       y = "Number of shot attempts")
+curry_shot_ecdf_made <- curry_shots %>%
+  ggplot(aes(x = shot_distance,
+             color = is_shot_made)) + 
+  stat_ecdf() +
+  geom_rug(alpha = 0.3) +
+  theme_bw() +
+  labs(x = "Shot distance (in feet)",
+       y = "Proportion of Curry shot attempts")
+curry_shot_dens_made + curry_shot_ecdf_made + plot_layout(guides = 'collect') #<<
+```
+
+---
+
+## Another code interlude: [collect the legends](https://patchwork.data-imaginist.com/articles/guides/layout.html#controlling-guides)
+
+```{r ref.label='shot-dist-curve-ecdf-color', eval = FALSE}
+
+```
+
+---
+
+## Alternative to violins - ridge plots
+
+.pull-left[
+
+- Check out the [`ggridges`](https://cran.r-project.org/web/packages/ggridges/vignettes/introduction.html) package for a variety of customization options
+
+```{r ridges, eval = FALSE}
+library(ggridges)
+curry_shots %>%
+  ggplot(aes(x = shot_distance,
+             y = shot_type)) + #<< 
+  geom_density_ridges(rel_min_height = 0.01) + #<<
+  theme_bw()
+```
+
+- Useful to display conditional distributions across many levels
+]
+.pull-right[
+```{r ref.label = 'ridges', echo = FALSE, fig.height=7}
+```
+]
+
+
+---
+
+## What about for 2D? (two continuous variables)
+
+We can visualize all of the shot locations: (`shot_x`, `shot_y`)
+
+.pull-left[
+
+```{r shot-loc-points, eval = FALSE}
+curry_shots %>%
+  # Modify the shot coordinates
+  mutate(shot_x = -shot_x / 10,
+         shot_y = shot_y / 10) %>%
+  ggplot(aes(x = shot_x, y = shot_y)) + #<<
+  geom_point(alpha = 0.3) + #<<
+  theme_bw()
+```
+
+- Adjust transparency with `alpha` for overlapping points
+
+]
+.pull-right[
+```{r ref.label = 'shot-loc-points', echo = FALSE, fig.height=6}
+
+```
+
+]  
+
+---
+
+## Create contours of 2D kernel density estimate (KDE)
+
+
+.pull-left[
+
+- We make 2D KDE __contour__ plots using [`geom_density2d()`](https://ggplot2.tidyverse.org/reference/geom_density_2d.html)
+
+```{r shot-loc-points-contour, eval = FALSE}
+curry_shots %>%
+  # Modify the shot coordinates
+  mutate(shot_x = -shot_x / 10,
+         shot_y = shot_y / 10) %>%
+  filter(shot_y <= 30) %>%
+  ggplot(aes(x = shot_x, y = shot_y)) + 
+  geom_point(alpha = 0.3) + 
+  geom_density2d() + #<<
+  theme_bw() + theme(legend.position = "bottom") +
+  coord_fixed() #<<
+```
+
+- Extend KDE for joint density estimates in 2D (see [section 14.4.2 for details](https://www.stat.cmu.edu/~cshalizi/ADAfaEPoV/))
+
+- `coord_fixed()` forced a fixed ratio
+
+]
+.pull-right[
+```{r ref.label = 'shot-loc-points-contour', echo = FALSE, fig.height=6}
+
+```
+
+]  
+
+---
+
+## Create contours of 2D kernel density estimate (KDE)
+
+
+.pull-left[
+
+- We make 2D KDE __contour__ plots using [`geom_density2d()`](https://ggplot2.tidyverse.org/reference/geom_density_2d.html)
+
+```{r shot-loc-points-contour-adjust, eval = FALSE}
+curry_shots %>%
+  # Modify the shot coordinates
+  mutate(shot_x = -shot_x / 10,
+         shot_y = shot_y / 10) %>%
+  # Remove the outlier shots:
+  filter(shot_y <= 30) %>%
+  ggplot(aes(x = shot_x, y = shot_y)) + 
+  geom_point(alpha = 0.3) + 
+  geom_density2d(adjust = 0.1) + #<<
+  theme_bw() + 
+  theme(legend.position = "bottom") +
+  coord_fixed()
+```
+
+- Can use `adjust` to modify the multivariate bandwidth
+
+]
+.pull-right[
+```{r ref.label = 'shot-loc-points-contour-adjust', echo = FALSE, fig.height=6}
+
+```
+
+]  
+
+---
+
+## Contours are difficult... let's make a heatmap instead
+
+.pull-left[
+
+- We make 2D KDE __heatmap__ plots using [`stat_density_2d()`](https://ggplot2.tidyverse.org/reference/geom_density_2d.html)
+and the `..` or [`after_stat()`](https://ggplot2.tidyverse.org/reference/aes_eval.html) function
+
+```{r shot-loc-points-heatmap, eval = FALSE}
+curry_shots %>%
+  mutate(shot_x = -shot_x / 10,
+         shot_y = shot_y / 10) %>%
+  filter(shot_y <= 30) %>%
+  ggplot(aes(x = shot_x, y = shot_y)) + 
+  stat_density2d(h = 0.5, bins = 60, #<<
+                 aes(fill = after_stat(level)), #<<
+                 geom = "polygon") + #<<
+  scale_fill_gradient(low = "darkblue", #<<
+                      high = "darkorange") + #<<
+  theme_bw() + theme(legend.position = "bottom") +
+  coord_fixed()
+```
+
+__Multivariate density estimation can be difficult__
+
+]
+.pull-right[
+```{r ref.label = 'shot-loc-points-heatmap', echo = FALSE, fig.height=6}
+
+```
+
+]  
+
+---
+
+
+
+## Turn off contours and use tiles instead
+
+
+.pull-left[ 
+- We make 2D KDE __heatmap__ plots using [`stat_density_2d()`](https://ggplot2.tidyverse.org/reference/geom_density_2d.html)
+and the `..` or [`after_stat()`](https://ggplot2.tidyverse.org/reference/aes_eval.html) function
+
+```{r shot-loc-points-heatmap-tile, eval = FALSE}
+curry_shots %>%
+  mutate(shot_x = -shot_x / 10,
+         shot_y = shot_y / 10) %>%
+  filter(shot_y <= 30) %>%
+  ggplot(aes(x = shot_x, y = shot_y)) + 
+  stat_density2d(h = 0.5, bins = 60,
+                 contour = FALSE, #<<
+                 aes(fill = after_stat(density)), #<<
+                 geom = "raster") + #<<
+  scale_fill_gradient(low = "darkblue", #<<
+                      high = "darkorange") + #<<
+  theme_bw() + theme(legend.position = "bottom") +
+  coord_fixed()
+```
+
+
+]
+.pull-right[
+```{r ref.label = 'shot-loc-points-heatmap-tile', echo = FALSE, fig.height=6}
+
+```
+
+]  
+
+---
+
+## Best alternative? Hexagonal binning
+
+
+.pull-left[ 
+- We make __hexagonal heatmap__ plots using [`geom_hex()`](https://ggplot2.tidyverse.org/reference/geom_hex.html)
+
+- Need to have the [`hexbin`](https://cran.r-project.org/web/packages/hexbin/index.html) package installed
+
+```{r shot-loc-points-hex, eval = FALSE}
+curry_shots %>%
+  mutate(shot_x = -shot_x / 10,
+         shot_y = shot_y / 10) %>%
+  filter(shot_y <= 30) %>%
+  ggplot(aes(x = shot_x, y = shot_y)) + 
+  geom_hex(binwidth = c(1, 1)) + #<<
+  scale_fill_gradient(low = "darkblue", 
+                      high = "darkorange") + 
+  theme_bw() + theme(legend.position = "bottom") +
+  coord_fixed()
+```
+
+- Can specify `binwidth` in both directions
+- Avoids limitations from smoothing
+
+]
+.pull-right[
+```{r, echo = FALSE, fig.height=6, include=TRUE}
+curry_shots %>%
+  mutate(shot_x = -shot_x / 10,
+         shot_y = shot_y / 10) %>%
+  filter(shot_y <= 30) %>%
+  ggplot(aes(x = shot_x, y = shot_y)) + 
+  geom_hex(binwidth = c(1, 1)) + #<<
+  scale_fill_gradient(low = "darkblue", 
+                      high = "darkorange") + 
+  theme_bw() + theme(legend.position = "bottom") +
+  coord_fixed()
+```
+
+]  
+
+
+---
+
+## What about his shooting efficiency?
+
+- Can compute a function of another variable inside hexagons with [`stat_summary_hex()`](https://ggplot2.tidyverse.org/reference/stat_summary_2d.html)
+
+- Check out [BallR](https://github.com/toddwschneider/ballr) for code examples to make shot charts and drawing courts
+
+
+.pull-left[
+```{r shot-loc-hex-make, eval = FALSE}
+curry_shots %>%
+  mutate(shot_x = -shot_x / 10,
+         shot_y = shot_y / 10) %>%
+  filter(shot_y <= 30) %>%
+  ggplot(aes(x = shot_x, y = shot_y, 
+             z = is_shot_made, #<<
+             group = -1)) + #<<
+  stat_summary_hex(binwidth = c(2, 2), #<<
+                   color = "black", #<<
+                   fun = mean) + #<<
+  scale_fill_gradient(low = "darkblue", 
+                      high = "darkorange") + 
+  theme_bw() + theme(legend.position = "bottom") +
+  coord_fixed()
+```
+
+]
+.pull-right[
+```{r, echo = FALSE, include=TRUE, fig.height=6}
+curry_shots %>%
+  mutate(shot_x = -shot_x / 10,
+         shot_y = shot_y / 10) %>%
+  filter(shot_y <= 30) %>%
+  ggplot(aes(x = shot_x, y = shot_y, 
+             z = is_shot_made, #<<
+             group = -1)) + #<<
+  stat_summary_hex(binwidth = c(2, 2), #<<
+                   color = "black", #<<
+                   fun = mean) + #<<
+  scale_fill_gradient(low = "darkblue", 
+                      high = "darkorange") + 
+  theme_bw() + theme(legend.position = "bottom") +
+  coord_fixed()
+```
+]  
+
+
+
+
+
+
+
+
+  
