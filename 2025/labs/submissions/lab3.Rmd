@@ -1,0 +1,194 @@
+Lab 2 
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+```
+
+Lab 3.1.3 
+
+```{r}
+#load in starter code
+getwd()
+mlb_team_seasons = read_csv("../github/2025/labs/data/03_nba-four-factors.csv")
+head(mlb_team_seasons)
+
+#task 1 
+
+variables <- mlb_team_seasons %>% 
+  mutate(
+    x1 = `EFG%`-`OPP EFG%`, 
+    x2 = `OREB%` -`DREB%`,
+    x3 = `TOV%` - `OPP TOV %`,
+    x4 = `FT Rate` - `OPP FT Rate`) 
+
+summary(variables)
+
+
+plot_histograms <- function(data, vars) {
+  data %>%
+    select(all_of(vars)) %>%
+    pivot_longer(everything(), names_to = "Variable", values_to = "Value") %>%
+    ggplot(aes(x = Value)) +
+    geom_histogram(bins = 20, fill = "steelblue", color = "white") +
+    facet_wrap(~Variable, scales = "free", ncol = 2) +
+    theme_minimal() +
+    labs(title = "Histograms of Variables", x = "Value", y = "Count")
+}
+
+plot_histograms(variables, c("x1", "x2", "x3", "x4"))
+
+corr <- variables %>% 
+  select(x1,x2,x3,x4) %>% 
+  cor(use = "complete.obs")
+print(corr)
+
+```
+Task 2
+
+```{r}
+# 1 - fit simple multivariate regression
+
+variables <- variables %>% 
+  mutate (
+    wins = mlb_team_seasons$W
+  )
+model = lm(W ~ x1+x2+x3+x4, data = variables)
+model
+```
+
+```{r}
+# 2 - standardize than refit 
+
+standardized_variables <- variables %>% 
+  mutate(
+    x1_z = scale(x1)[, 1],
+    x2_z = scale(x2)[, 1],
+    x3_z = scale(x3)[, 1],
+    x4_z = scale(x4)[, 1]
+  )
+
+model = lm(W ~ x1_z+x2_z+x3_z+x4_z, data = standardized_variables)
+model
+
+#3 relative importance 
+#Model 2 will give more relative importance, we see that x1 and x3 are most important, followed by x4 and finally x2
+```
+
+```{r}
+# 4 - perform out of sample prediction test
+performance <- function(data, formula, test_frac = 0.2, seed = 123) {
+    set.seed(seed)
+  
+  n <- nrow(data)
+  test_idx <- sample(1:n, size = test_frac * n)
+  
+  train <- data[-test_idx, ]
+  test <- data[test_idx, ]
+  
+  # Fit model
+  model <- lm(formula, data = train)
+  
+  # Predict
+  test$pred <- predict(model, newdata = test)
+  
+  # Evaluate
+  response_var <- all.vars(formula)[1]
+  actual <- test[[response_var]]
+  mse <- mean((actual - test$pred)^2)
+  r2 <- 1 - sum((actual - test$pred)^2) / sum((actual - mean(actual))^2)
+  
+  return(list(
+    formula = formula,
+    mse = mse,
+    r_squared = r2
+  ))
+}
+
+performance(
+  data = variables,
+  formula = wins ~ x1 + x2 + x3 + x4,
+)
+
+performance(
+  data = standardized_variables,
+  formula = wins ~ x1_z + x2_z + x3_z + x4_z,
+)
+
+```
+
+3.2.2
+Task 1 
+
+```{r}
+# 1 - model next yard line as function of current yard and punter quality 
+punting = read_csv("../github/2025/labs/data/03_punts.csv")
+head(punting)
+
+ggplot(punting, aes(x = ydl, y = next_ydl)) +
+  geom_point(color = "steelblue", size = 2) +
+  labs(title = "Scatter Plot of Current vs Next Yard Line",
+       x = "ydl",
+       y = "next_ydl") +
+  theme_minimal()
+
+ggplot(punting, aes(x = pq, y = next_ydl)) +
+  geom_point(color = "steelblue", size = 2) +
+  labs(title = "Scatter Plot of Punter Quality vs Next Yard Line",
+       x = "pq",
+       y = "next_ydl") +
+  theme_minimal()
+
+#linear model
+model = lm(next_ydl ~ ydl + pq, data = punting)
+model
+
+#quadratic in current yard line model 
+q_model = lm(next_ydl ~ ydl + I(ydl^2) + pq, data = punting)
+q_model
+
+spline_model = lm(next_ydl~ ydl+I(ydl^2)+splines::bs(pq, degree = 3, df = 5), data = punting)
+spline_model
+
+performance(punting, formula = next_ydl ~ ydl + I(ydl^2) + pq)
+
+performance(punting, formula = next_ydl ~ ydl + I(ydl^2) + splines::bs(pq, degree = 3, df = 5))
+
+```
+```{r}
+# 2 - pick model and visualize 
+#pick the spline model 
+
+punting$predicted_next_ydl <- predict(spline_model, newdata = punting)
+
+ggplot(punting, aes(x = next_ydl, y = predicted_next_ydl, color = pq)) +
+  geom_point(alpha = 0.7, size = 2) +
+  geom_abline(slope =1, intercept = 0, linetype = 'dashed', color = 'black')
+  labs(title = "Punter performance",
+       x = "Actual Next Yard Line",
+       y = "Predicted Next Yard Line") +
+  theme_minimal()
+
+```
+Task 2 
+
+```{r}
+#1 - rank punters in pyoe
+punting$pyoe <- punting$predicted_next_ydl-punting$next_ydl
+punter_ranks <- punting %>%
+  group_by(punter) %>%
+  summarize(avg_pyoe = mean(pyoe, na.rm = TRUE)) %>%
+  arrange(desc(avg_pyoe)) %>% 
+  slice_head(n = 20) 
+
+ggplot(punter_ranks, aes(x = reorder(punter, avg_pyoe), y = avg_pyoe)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Top 20 Punters by Average PYOE",
+    x = "Punter",
+    y = "Average PYOE"
+  ) +
+  theme_minimal()
+
+```
