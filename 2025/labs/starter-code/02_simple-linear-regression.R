@@ -2,7 +2,8 @@
 ### SETUP ###
 #############
 
-# install.packages("tidyverse")
+# install.packages(c("ggplot2", "tidyverse"))
+library(ggplot2)
 library(tidyverse)
 
 # set working directory to wherever your data is
