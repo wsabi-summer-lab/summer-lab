@@ -8,16 +8,17 @@ This repository contains the WSABI Summer Research Lab materials, organized by y
 .
 ├── 2024/
 │   ├── labs/
-│   │   ├── code/
 │   │   └── data/
 │   └── lectures/
-│       ├── code/
 │       └── data/
 ├── 2025/
 │   ├── labs/
-│   │   ├── code/
-│   │   └── data/
+│   │   ├── data/
+│   │   ├── starter-code/
+│   │   └── submissions
 │   └── lectures/
 │       ├── code/
 │       └── data/
+│   └── supplementary/
+
 ```
