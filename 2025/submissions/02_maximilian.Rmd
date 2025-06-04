@@ -1,0 +1,201 @@
+---
+title: "Wharton SLR Lab"
+author: "Maximilian J. Gebauer"
+date: "2025-06-03"
+output: html_document
+---
+
+```{r Setup, include=FALSE, results='hide', warning=FALSE}
+knitr::opts_chunk$set(echo = T, fig.width=8, fig.height=4)
+options(scipen = 0, digits = 3)  # controls base R output
+
+# Package setup
+if(!require("pacman")) install.packages("pacman")
+
+pacman::p_load(tidyverse, dplyr, ggthemes, data.table, lubridate, glmnet,
+               GGally, RColorBrewer, ggsci, plotROC, usmap,
+               plotly, ggpubr, vistime, coefplot, skimr, car, ggrepel, slider, lubridate,
+               tidymodels,ranger,vip,ggplot2, tune,dials,pdp, purrr, stringr, lmtest,
+               sandwich, Lahman)
+```
+
+
+```{r}
+library(Lahman)
+```
+
+```{r}
+data <- Lahman::Teams
+data_sub <- data %>%
+  filter(yearID %in% c(2017,2018,2019,2020,2021)) %>%
+  select(yearID, teamID, W, G, R, RA) %>%
+  mutate(WP = W / G) %>%
+  select(-c(W,G))
+```
+
+# 2.1.3
+
+## Task 1.
+
+We use a logit transform on WP then run lm() and find $\widehat{\alpha} = 1.80003$
+
+```{r}
+data_mod <- data_sub
+data_mod <- data_mod %>%
+  mutate(
+    response = log(WP / (1-WP)),
+    predictor = log(R / RA)
+  )
+```
+
+```{r}
+model <- lm(response ~ predictor, data = data_mod)
+summary(model)
+```
+
+```{r}
+sum_data <- data_mod
+sum_data$fitted <- fitted(model)
+```
+
+## Task 2
+
+
+Now we compute Reduction in Error for the original Pythag model and our lm derived optimal alpha value. We find that RE for Pythag is 0.665 and the RE for our new model is 0.68, indicating a greater reduction in error for our model with $\widehat{\alpha} \approx 1.8$. We provide a plot below visualizing the superior performance of our new model relative to Pythag.
+
+
+```{r}
+pythag <- data_sub
+pythag <- pythag %>%
+  mutate(
+    predictor = (R^2 / (R^2 + RA^2)),
+    resid = (WP - predictor)
+  )
+
+WP_hat_pythag <- 1 - sd(pythag$resid)/sd(pythag$WP)
+WP_hat_pythag
+```
+
+```{r}
+WP_hat <- 1 - sd(model$residuals) / sd(data_mod$response)
+WP_hat
+```
+
+```{r}
+models <- c("WP Hat", "WP Pythag")
+RE <- c(WP_hat,WP_hat_pythag)
+
+new_data <- as.data.frame(cbind(models,RE))
+new_data$RE <- as.numeric(new_data$RE)
+new_data$models <- as.factor(new_data$models)
+```
+
+```{r}
+ggplot(new_data, aes(x = models, y = RE, fill = models)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Model", y = "RE", title = "RE by Model") +
+  theme_minimal() +
+  coord_cartesian(ylim = c(.6, .7)) +
+  theme_minimal()
+```
+
+# 2.2.2
+
+## Task 1
+
+
+Below we give scatterplots for Median Payroll by Win Percentage and Log Median Payroll and Win Percentage with fitted lm lines for each. We removed the Covid-shortend 2020 season and pick out the New York Yankees and Oakland Atheltics data points by color. Sans 2020 our data covers 1998-2023. 
+
+
+```{r}
+pay <- read.csv("/Users/maximiliangebauer/Downloads/02_mlb-payrolls.csv")
+```
+
+```{r}
+pay_sub <- pay %>%
+  filter(yearID != 2020)
+```
+
+```{r, warning=FALSE,message=FALSE,fig.height=6,fig.width=10}
+ggplot(pay_sub, aes(x=Payroll.Median,y=WP)) + 
+  geom_point() +
+  geom_smooth(mapping=aes(x=Payroll.Median,y=WP),method="lm") +
+  geom_point(
+    data = pay_sub %>% filter(name %in% c("New York Yankees", "Oakland Athletics")),
+    aes(color = name)
+  ) + theme_minimal() +
+  labs(
+    title = "Season Win Percentage by Median Payroll"
+  )
+
+ggplot(pay_sub, aes(x=Log..Payroll.Median.,y=WP)) + 
+  geom_point() +
+  geom_smooth(mapping=aes(x=Log..Payroll.Median.,y=WP),method="lm") +
+  geom_point(
+    data = pay_sub %>% filter(name %in% c("New York Yankees", "Oakland Athletics")),
+    aes(color = name)
+  ) + theme_minimal() +
+  labs(
+    title = "Season Win Percentage by Log(Median Payroll)"
+  )
+```
+
+## Task 2
+
+
+
+Below we provide plots of average residual by Team for each model in decreasing order. Model A represents regressing Win Percentage on Median Payroll and Model B represents regressing Win Percentage on Log Median Payroll. 
+
+
+
+```{r}
+model_median <- lm(WP ~ Payroll.Median, data = pay_sub)
+model_log_median <- lm(WP ~ Log..Payroll.Median., data = pay_sub)
+```
+
+```{r}
+pay_mod <- pay_sub
+pay_mod$modelA_resid <- model_median$residuals
+pay_mod$modelB_resid <- model_log_median$residuals
+```
+
+```{r}
+pay_mod$name <- as.factor(pay_mod$name)
+```
+
+```{r}
+results <- pay_mod %>%
+  group_by(name) %>%
+  summarise(
+    Avg_dif_median = mean(modelA_resid),
+    Avg_dif_logmedian = mean(modelB_resid)
+  )
+```
+
+```{r, warning=FALSE,message=FALSE,fig.height=6,fig.width=10}
+ggplot(results, aes(x =reorder(name, -Avg_dif_median), y = Avg_dif_median * 162)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Team", y = "Average Residual", title = "Average (Model A) Residual by Team") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8)
+  )
+
+ggplot(results, aes(x =reorder(name, -Avg_dif_logmedian), y = Avg_dif_logmedian * 162)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Team", y = "Average Residual", title = "Average (Model B) Residual by Team") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8)
+  )
+```
+
+
+Final Question:
+
+
+I find model B better where we log transform the predictor as I find the elasticity interpretation more intuitive than the interpretation licensed in model A. 
+
+
+
+
