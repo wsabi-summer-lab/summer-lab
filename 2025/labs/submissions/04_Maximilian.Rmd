@@ -1,0 +1,386 @@
+---
+title: "04_Maximilian"
+author: "Maximilian J. Gebauer"
+date: "2025-06-05"
+output: html_document
+---
+
+```{r Setup, include=FALSE, results='hide', warning=FALSE}
+knitr::opts_chunk$set(echo = T, fig.width=8, fig.height=4)
+options(scipen = 0, digits = 3)  # controls base R output
+
+# Package setup
+if(!require("pacman")) install.packages("pacman")
+
+pacman::p_load(tidyverse, dplyr, ggthemes, data.table, lubridate, glmnet,
+               GGally, RColorBrewer, ggsci, plotROC, usmap,
+               plotly, ggpubr, vistime, coefplot, skimr, car, ggrepel, slider, lubridate,
+               tidymodels,ranger,vip,ggplot2, tune,dials,pdp, purrr, stringr, lmtest,
+               sandwich, Lahman)
+```
+
+```{r}
+field_goals <- read_csv("../data/04_field-goals.csv")
+```
+```{r}
+#field_goals$fg_made <- as.factor(field_goals$fg_made)
+field_goals$kicker <- as.factor(field_goals$fg_made)
+```
+
+Split into training and test sets.
+
+```{r}
+set.seed(321)
+n <- nrow(field_goals)
+
+train_prop <- .8
+train_size <- .8 * n
+
+train_indices <- sample(n,train_size,replace = F)
+
+train_data <- field_goals[train_indices, ]
+
+test_data <- setdiff(field_goals,train_data)
+```
+
+
+We fit the following three models: linear with features yardline and kicker quality, logistic with features yardline and kicker quality, and logistic with features yardline squared yardline and kicker quality.
+
+
+```{r}
+linear_fg_model <- lm(fg_made ~ ydl + kq, data = train_data)
+logistic_fg_model1 <- glm(as.factor(fg_made) ~ ydl + kq, data = train_data, family = "binomial")
+logistic_fg_model2 <- glm(as.factor(fg_made) ~ kq + ydl + I(ydl^2), data = train_data, family = "binomial")
+```
+
+```{r}
+linear_test_data <- test_data %>%
+  mutate(fg_made = as.numeric(fg_made))
+#hist(predict(linear_fg_model, newdata = linear_test_data))
+
+probs3 <- predict(linear_fg_model, newdata = linear_test_data)
+```
+
+
+```{r}
+test_data1 <- test_data %>%
+  mutate(fg_made = as.factor(fg_made))
+probs1 <- predict(logistic_fg_model1,test_data1,type = "response")
+preds1 <- as.factor(ifelse(probs1>.5,1,0))
+
+probs2 <- predict(logistic_fg_model2,test_data1,type = "response")
+preds2 <- as.factor(ifelse(probs2>.5,1,0))
+
+#caret::confusionMatrix(test_data1$fg_made,preds1, positive = "1")
+#caret::confusionMatrix(test_data1$fg_made,preds2, positive = "1")
+```
+
+The linear model has the lowest MSE of the three models.
+
+```{r}
+mean((probs1 - (as.numeric(test_data1$fg_made)-1))^2)
+mean((probs2 - (as.numeric(test_data1$fg_made)-1))^2)
+mean(probs3 - linear_test_data$fg_made)^2
+```
+
+
+Below we give calibration plots for the three models on the test set.
+
+```{r}
+df <- data.frame(
+  y_true = as.numeric(test_data1$fg_made) - 1,
+  y_prob = probs1
+)
+
+# 2. Bin predicted probabilities into quantiles or fixed-width bins
+#    Use cut() for fixed-width bins, or ntile() for quantiles (requires dplyr)
+df$bin <- cut(df$y_prob, breaks = seq(0, 1, by = 0.1), include.lowest = TRUE)
+
+# 3. Calculate average predicted prob and actual event rate per bin
+calib_df <- df %>%
+  group_by(bin) %>%
+  summarise(
+    pred_prob = mean(y_prob),
+    true_rate = mean(y_true),
+    count     = n()
+  ) %>%
+  na.omit()
+
+# 4. Plot calibration curve
+ggplot(calib_df, aes(x = pred_prob, y = true_rate)) +
+  geom_line(color = "blue") +
+  geom_point(size = 2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray40") +
+  labs(
+    x = "Predicted Probability",
+    y = "Observed Frequency",
+    title = "Calibration Plot (Logistic Model 1)"
+  ) +
+  theme_minimal()
+
+df1 <- data.frame(
+  y_true = as.numeric(test_data1$fg_made) - 1,
+  y_prob = probs2
+)
+
+# 2. Bin predicted probabilities into quantiles or fixed-width bins
+#    Use cut() for fixed-width bins, or ntile() for quantiles (requires dplyr)
+df1$bin <- cut(df1$y_prob, breaks = seq(0, 1, by = 0.1), include.lowest = TRUE)
+
+# 3. Calculate average predicted prob and actual event rate per bin
+calib_df1 <- df1 %>%
+  group_by(bin) %>%
+  summarise(
+    pred_prob = mean(y_prob),
+    true_rate = mean(y_true),
+    count     = n()
+  ) %>%
+  na.omit()
+
+# 4. Plot calibration curve
+ggplot(calib_df1, aes(x = pred_prob, y = true_rate)) +
+  geom_line(color = "blue") +
+  geom_point(size = 2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray40") +
+  labs(
+    x = "Predicted Probability",
+    y = "Observed Frequency",
+    title = "Calibration Plot (Logistic Model 2)"
+  ) +
+  theme_minimal()
+
+df2 <- data.frame(
+  y_true = as.numeric(test_data1$fg_made) - 1,
+  y_prob = probs3
+)
+
+# 2. Bin predicted probabilities into quantiles or fixed-width bins
+#    Use cut() for fixed-width bins, or ntile() for quantiles (requires dplyr)
+df2$bin <- cut(df2$y_prob, breaks = seq(0, 1, by = 0.1), include.lowest = TRUE)
+
+# 3. Calculate average predicted prob and actual event rate per bin
+calib_df2 <- df2 %>%
+  group_by(bin) %>%
+  summarise(
+    pred_prob = mean(y_prob),
+    true_rate = mean(y_true),
+    count     = n()
+  ) %>%
+  na.omit()
+
+# 4. Plot calibration curve
+ggplot(calib_df2, aes(x = pred_prob, y = true_rate)) +
+  geom_line(color = "blue") +
+  geom_point(size = 2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray40") +
+  labs(
+    x = "Predicted Probability",
+    y = "Observed Frequency",
+    title = "Calibration Plot (Linear Model)"
+  ) +
+  theme_minimal()
+```
+
+Below is the model summary for the linear model. For a numeric feature like ydl, the coefficient (-0.012106) represents the expected increase in the probability of making a field goal for each additional yard of distance to the field goal, all else being equal. For kq, the coefficient is 0.027285, giving the additive increase in expected probability of making a field goal for a 1 SD increase in the kicker quality metric (since the feature is standerdized), all else being equal. The intercept coefficient can be interpretted as the expected probability of making a field goal when ydl is 0 and the kicker is of average quality (since that feature is standerdized).
+
+
+```{r}
+summary(linear_fg_model)
+```
+
+Below we plot the predicted probabilities for the linear model against the true labels of the test set (jittered for readability)
+
+```{r}
+linear_preds <- predict(linear_fg_model, newdata = linear_test_data)
+true_labels <- linear_test_data$fg_made
+results_data <- cbind(linear_preds, true_labels)
+
+ggplot(results_data, aes(x = linear_preds, y = true_labels)) +
+  geom_jitter(width=.01) +
+  labs(
+    x = "Predicted Probability",
+    y = "True Labels",
+    title = "Linear Model Predictions vs True Labels"
+  ) +
+  theme_minimal()
+```
+
+
+
+```{r}
+ncaab_results = read_csv("../data/04_ncaab-results.csv")
+ncaab_teams = read_csv("../data/04_ncaab-teams.csv")
+```
+
+Below we fit a Bradley-Terry Logistic Model predicting home team wins based on the team IDs of the home and away teams. The model is fit using a design matrix that encodes the home and away teams as binary variables, with the home team coded as 1 and the away team coded as -1. The intercept represents average home team advantage. We drop all neutral site games from the data prior to fitting.
+
+```{r}
+
+```{r}
+df <- ncaab_results
+df2 <- subset(df, WLoc %in% c("H","A"))
+
+df2$Home <- ifelse(df2$WLoc == "H", df2$WTeamID, df2$LTeamID)
+df2$Away <- ifelse(df2$WLoc == "H", df2$LTeamID, df2$WTeamID)
+
+teams <- sort(unique(c(df2$Home, df2$Away)))
+
+n   <- nrow(df2)
+p   <- length(teams)
+mat <- matrix(0, nrow = n, ncol = p)
+colnames(mat) <- paste0("Team_", teams)
+
+for (i in seq_len(n)) {
+  h <- df2$Home[i]  
+  a <- df2$Away[i]
+  
+  mat[i, paste0("Team_", h)] <-  1
+  mat[i, paste0("Team_", a)] <- -1
+}
+
+home_win <- ifelse(df2$WLoc == "H", 1, 0)
+
+design_df <- as.data.frame(mat)
+design_df$home_win <- home_win
+
+design_df$home_win <- as.factor(design_df$home_win)
+```
+
+```{r}
+bt_model <- glm(home_win ~ ., data = design_df, family = "binomial")
+```
+
+
+The plot below returns the top 10 largest team coefficients, top 10 smallest team coefficients, and the intercept coefficient from the model.
+
+
+```{r}
+coefs <- coef(bt_model)
+
+coefs_df <- data.frame(
+  team = names(coefs),
+  beta = as.numeric(coefs),
+  stringsAsFactors = FALSE
+)
+
+intercept_df <- subset(coefs_df, team == "(Intercept)")
+
+team_coefs <- subset(coefs_df, team != "(Intercept)")
+
+team_coefs$TeamID <- as.numeric(sub("^Team_", "", team_coefs$team))
+
+team_coefs_named <- merge(
+  team_coefs,
+  ncaab_teams,
+  by     = "TeamID",
+  all.x  = TRUE,
+  sort   = FALSE
+)
+
+if (any(is.na(team_coefs_named$TeamName))) {
+  warning("Some TeamIDs from the model were not found in ncaab_teams.")
+}
+
+ordered_idx    <- order(team_coefs_named$beta, decreasing = TRUE)
+top10_idx      <- head(ordered_idx, 10)
+bottom10_idx   <- head(order(team_coefs_named$beta, decreasing = FALSE), 10)
+
+top10_named    <- team_coefs_named[top10_idx, ]
+bottom10_named <- team_coefs_named[bottom10_idx, ]
+
+plot_df <- rbind(
+  data.frame(
+    Label = "Intercept",
+    Beta  = intercept_df$beta,
+    Group = "Intercept",
+    stringsAsFactors = FALSE
+  ),
+  data.frame(
+    Label = top10_named$TeamName,
+    Beta  = top10_named$beta,
+    Group = "Top 10",
+    stringsAsFactors = FALSE
+  ),
+  data.frame(
+    Label = bottom10_named$TeamName,
+    Beta  = bottom10_named$beta,
+    Group = "Bottom 10",
+    stringsAsFactors = FALSE
+  )
+)
+
+plot_df$Label <- factor(
+  plot_df$Label,
+  levels = plot_df$Label[order(plot_df$Beta)]
+)
+
+ggplot(plot_df, aes(x = Label, y = Beta, fill = Group)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(
+    values = c(
+      "Intercept" = "gray40",
+      "Top 10"     = "steelblue",
+      "Bottom 10"  = "firebrick"
+    ),
+    guide = guide_legend(title = "Coefficient Type")
+  ) +
+  labs(
+    x     = "Team Name (or Intercept)",
+    y     = "Estimated Beta",
+    title = "Home Advantage Intercept & Top 10/Bottom 10 Team Strengths"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 10),
+    plot.title  = element_text(hjust = 0.5, face = "bold")
+  )
+```
+
+The below code returns the implied porbabilties over the final game played at a neutral site.
+
+```{r}
+predict_neutral <- function(model_coefs, team_i, team_j) {
+  name_i <- paste0("Team_", team_i)
+  name_j <- paste0("Team_", team_j)
+  
+  if (!(name_i %in% names(model_coefs))) {
+    stop("Team_i (", team_i, ") not found among model coefficients.")
+  }
+  if (!(name_j %in% names(model_coefs))) {
+    stop("Team_j (", team_j, ") not found among model coefficients.")
+  }
+  
+  beta_i <- model_coefs[[name_i]]
+  beta_j <- model_coefs[[name_j]]
+  
+  logit_ij <- beta_i - beta_j
+  
+  prob_i_beats_j <- plogis(logit_ij)
+  return(prob_i_beats_j)
+}
+teamA <- 1345
+teamB <- 1163
+
+prob_1345_over_1163 <- predict_neutral(coefs, teamA, teamB)
+c("Estimated P(Purdue Wins at Neutral Site)",prob_1345_over_1163)
+c("Estimated P(UConn Wins at Neutral Site)",1-prob_1345_over_1163)
+```
+
+
+The moneyline for the Purdue UConn game is -135 for Purdue.
+
+```{r}
+(ml <- -floor(100*prob_1345_over_1163/(1-prob_1345_over_1163)))
+```
+
+
+
+
+
+
+
+
+
+
+
