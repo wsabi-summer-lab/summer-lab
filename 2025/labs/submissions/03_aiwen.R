@@ -89,12 +89,9 @@ pred2 <- predict(mod2, newdata = test)
 # RMSE
 rmse1 <- sqrt(mean((test$W - pred1)^2))
 rmse2 <- sqrt(mean((test$W - pred2)^2))
-rmse1 == rmse2 # false
-rmse1 > rmse2 # false
-rmse1 < rmse2 # true
 
 print(c("Model 1 RMSE" = rmse1, "Model 2 RMSE (standardized x)" = rmse2))
-# rmse1 (without std) has slightly lower RMSE than rmse2 (with std), but they're pretty much the same
+# pretty much the same
 
 ##############
 ### PART 2 ###
@@ -120,6 +117,7 @@ spline_model = lm(next_ydl ~ splines::bs(ydl, degree = 3, df = 5) + splines::bs(
 summary(spline_model)
 
 # selecting model: spline vs. quadratic
+set.seed(3)
 n <- dim(punts)[1]
 train_indices <- sample(1:n, size = floor(0.8 * n))
 
