@@ -1,0 +1,191 @@
+---
+title: "Untitled"
+author: '38880242'
+date: "2025-06-04"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+#############
+### SETUP ###
+#############
+
+
+# install.packages(c("ggplot2", "tidyverse"))
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+
+# set working directory to wherever your data is
+setwd("filepath")
+
+##############
+### PART 1 ###
+##############
+
+# load data
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+nba_four_factors <- read_csv("../data/03_nba-four-factors.csv") %>%
+  mutate(
+    x1 = `EFG%`      - `OPP EFG%`,
+    x2 = `OREB%`     - `OPP REB %`,
+    x3 = `TOV%`      - `OPP TOV %`,
+    x4 = `FT Rate`   - `OPP FT Rate`
+  )
+
+graphdata <- nba_four_factors %>%
+  select(W, x1, x2, x3, x4) %>%
+  pivot_longer(
+    cols      = everything(),       
+    names_to  = "variable",         
+    values_to = "value"   
+  )
+
+ggplot(graphdata_long, aes(x = value)) +
+  geom_histogram(bins = 25) +
+  facet_wrap(~ variable, scales = "free") +
+  labs(
+    x     = "Value",
+    y     = "Count",
+    title = "Marginal Distributions of x1, x2, x3, x4"
+  ) +
+  theme_minimal()
+
+cordata <- nba_four_factors %>% 
+    select(W, x1, x2, x3, x4) 
+
+cor_matrix <- cor(cordata, use = "pairwise.complete.obs")
+```
+
+```{r}
+cor_matrix <- cor(cordata)
+
+```
+```{r}
+model <- lm(data = nba_four_factors, W ~ x1 + x2 + x3 + x4)
+summary(model)
+```
+
+```{r}
+mean_x1 <- mean(nba_four_factors$x1)
+sd_x1   <- sd(nba_four_factors$x1)
+
+mean_x2 <- mean(nba_four_factors$x2)
+sd_x2   <- sd(nba_four_factors$x2)
+
+mean_x3 <- mean(nba_four_factors$x3)
+sd_x3   <- sd(nba_four_factors$x3)
+
+mean_x4 <- mean(nba_four_factors$x4)
+sd_x4   <- sd(nba_four_factors$x4)
+
+normalized <- nba_four_factors %>% 
+  mutate(
+    x1 = (x1 - mean_x1) / sd_x1,
+    x2 = (x2 - mean_x2) / sd_x2,
+    x3 = (x3 - mean_x3) / sd_x3,
+    x4 = (x4 - mean_x4) / sd_x4
+  )
+finalnormalized <- normalized %>%
+  mutate(
+    mean_x1 = mean(x1),
+    sd_x1   = sd(x1),
+    mean_x2 = mean(x2),
+    sd_x2   = sd(x2),
+    mean_x3 = mean(x3),
+    sd_x3   = sd(x3),
+    mean_x4 = mean(x4),
+    sd_x4   = sd(x4)
+  )
+finalmodel <- lm(data = finalnormalized, W ~ x1 + x2 + x3 + x4)
+```
+
+The standardized model tells you about the relative value of each of the four factors to winning. The rank of importance is EFG%, Turnover rate, OFR%, and then FT%
+
+
+
+
+
+
+```{r}
+set.seed(2025)
+n <- nrow(model_data)
+train_idx <- sample(1:n, size = 0.8 * n)
+train_raw <- model_data %>% 
+  slice(train_idx)
+test_raw  <- model_data %>%
+  slice(-train_idx)
+
+model_raw <- lm(W ~ x1 + x2 + x3 + x4, data = train_raw)
+
+mu_x1 <- mean(train_raw$x1, na.rm = TRUE)
+sd_x1 <- sd(train_raw$x1, na.rm = TRUE)
+mu_x2 <- mean(train_raw$x2, na.rm = TRUE)
+sd_x2 <- sd(train_raw$x2, na.rm = TRUE)
+mu_x3 <- mean(train_raw$x3, na.rm = TRUE)
+sd_x3 <- sd(train_raw$x3, na.rm = TRUE)
+mu_x4 <- mean(train_raw$x4, na.rm = TRUE)
+sd_x4 <- sd(train_raw$x4, na.rm = TRUE)
+
+train_std <- train_raw %>%
+  mutate(
+    x1 = (x1 - mu_x1) / sd_x1,
+    x2 = (x2 - mu_x2) / sd_x2,
+    x3 = (x3 - mu_x3) / sd_x3,
+    x4 = (x4 - mu_x4) / sd_x4
+  )
+
+model_std <- lm(W ~ x1 + x2 + x3 + x4, data = train_std)
+
+test_std <- test_raw %>%
+  mutate(
+    x1 = (x1 - mu_x1) / sd_x1,
+    x2 = (x2 - mu_x2) / sd_x2,
+    x3 = (x3 - mu_x3) / sd_x3,
+    x4 = (x4 - mu_x4) / sd_x4
+  )
+
+pred_raw <- predict(model_raw, newdata = test_raw)
+pred_std <- predict(model_std, newdata = test_std)
+
+actual <- test_raw$W
+ybar   <- mean(actual)   
+
+ss_res_raw <- sum((actual - pred_raw)^2)
+ss_res_std <- sum((actual - pred_std)^2)
+
+ss_tot <- sum((actual - ybar)^2)
+
+r2_raw <- 1 - ss_res_raw/ss_tot
+r2_std <- 1 - ss_res_std/ss_tot
+
+
+
+```
+They are the same
+##############
+### PART 2 ###
+##############
+
+```{r}
+library(splines)  
+
+NFL = read_csv("../data/03_punts.csv")
+fit_ydl <- lm(
+  next_ydl ~ bs(ydl, df = 4, degree = 3) + pq,
+  data = NFL
+)
+
+summary(fit_ydl)
+
+```
+```{r}
+
+```
+
