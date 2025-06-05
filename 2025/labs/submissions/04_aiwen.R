@@ -176,9 +176,12 @@ ggplot(top_20, aes(x = reorder(term, beta), y = beta)) +
 ## Purdue Boilermakers ("BPurdue") vs. UConn Huskies ("BConnecticut")
 purdue_beta <- coeffs_df %>% filter(term == "BPurdue") %>% pull(beta)
 uconn_beta  <- coeffs_df %>% filter(term == "BConnecticut") %>% pull(beta)
-log_odds_diff <- purdue_beta - uconn_beta # neutral site so no home field adv
+log_odds_diff <- purdue_beta - uconn_beta + 0.5 # neutral site so no home field adv
 
 # Using rule of thumb (1 log-odds unit ≈ 7 points)
 spread_estimate <- log_odds_diff * 7
 cat("Estimated Vegas spread (Purdue - UConn):", round(spread_estimate, 1), "points\n")
-# so Purdue is favored by about 1.9 points
+# so Purdue is favored by this many points
+
+# probability
+prob <- 1 / (1 + exp(-(0.5 + purdue_beta - uconn_beta)))
