@@ -79,7 +79,7 @@ for (i in 1:n_games) {
     X[i, lose_id + 1] = 1
   }
   else {
-    X[i, 1] = 0.5
+    X[i, 1] = 0
     X[i, win_id + 1] = 0.5
     X[i, lose_id + 1] = -0.5
   }
