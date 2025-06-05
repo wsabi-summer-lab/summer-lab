@@ -1,0 +1,237 @@
+4.1.2
+```{r}
+#1 - 3 different models for fg success prob 
+
+library(ggplot2)
+library(tidyverse)
+
+fg = read_csv('../data/04_field-goals.csv')
+head(fg)
+
+plotting <- function(x_data, y_data, color, x_title, y_title) {
+  ggplot(punting, aes(x = x_data, y = y_data, color = color)) +
+  geom_point(alpha = 0.7, size = 2) +
+  labs(
+      x = x_data,
+      y = y_data,
+      color = color
+    ) +
+    theme_minimal()
+
+}
+
+#plotting(fg$ydl, fg$fg_made, 'cornflowerblue', "Field Goal Yard Lines", "Kicker Quality") +
+  #geom_smooth(method = 'lm', se = FALSE, color = 'black') +
+  #ggtitle("Field Goal Success Probability by Yard Line")
+
+#linear model
+model = lm(fg_made ~ ydl + kq, data = fg)
+model
+#logistic model
+log_model = glm(fg_made ~ ydl + kq, data = fg, family = binomial)
+log_model
+#logistic polynomial model 
+log_poly_model = glm(fg_made ~ poly(ydl, 3) + kq, data = fg, family = binomial)
+log_poly_model
+```
+
+```{r}
+#2 - out of sample performance of each model 
+#performance function from lab 3
+performance <- function(data, formula, model_func = lm, test_frac = 0.2, seed = 42, family = NULL) {
+  set.seed(seed)
+  
+  n <- nrow(data)
+  test_idx <- sample(1:n, size = test_frac * n)
+  
+  train <- data[-test_idx, ]
+  test <- data[test_idx, ]
+  
+  # Fit model with user-defined modeling function and family
+  if (!is.null(family)) {
+    model <- model_func(formula = formula, data = train, family = family)
+  } else {
+    model <- model_func(formula = formula, data = train)
+  }
+  
+  # Predict
+  test$pred <- predict(model, newdata = test, type = if ("glm" %in% class(model)) "response" else "response")
+  
+  # Evaluate
+  response_var <- all.vars(formula)[1]
+  actual <- test[[response_var]]
+  mse <- mean((actual - test$pred)^2)
+  r2 <- 1 - sum((actual - test$pred)^2) / sum((actual - mean(actual))^2)
+  
+  return(list(
+    formula = formula,
+    model_type = deparse(substitute(model_func)),
+    mse = mse,
+    r_squared = r2
+  ))
+}
+
+#evaluate the models
+performance(fg, fg_made ~ ydl + kq, model_func = lm)
+performance(fg, fg_made ~ ydl + kq, model_func = glm)
+performance(fg, fg_made ~ poly(ydl, 3) + kq, model_func = glm)
+```
+3 - Interpretation of coefficients: 
+We see that both the linear model and the first logistic model are not the most accurate. The polynomial logistic model offers a better mse, meaning that the prediction is about .001 squared units more accurate, or .01 more units more accurate. This means that the model is more accurate on ~1/100 field goals. 
+
+```{r}
+#4 - plot the predicted probabilities of success for best model
+
+#actual probabilities based on yard line
+grouped_ydl <- fg %>%
+  group_by(ydl) %>%
+  summarise(avg_kq = mean(kq), avg_fg_made = mean(fg_made))
+
+grouped_ydl <- grouped_ydl %>%
+  rename(kq = avg_kq)
+
+#predicted probabilities based on yard line 
+x = seq(min(fg$ydl), max(fg$ydl), length.out = 100)
+predicted_prob <- predict(log_poly_model, newdata = data.frame(ydl = x, kq = mean(fg$kq)), type = "response")
+grouped_ydl <- grouped_ydl %>%
+  mutate(predicted_prob = predict(log_poly_model, newdata = data.frame(ydl = ydl, kq = mean(fg$kq)), type = "response"))
+
+head(grouped_ydl)
+
+#plot data with prediction
+ggplot(grouped_ydl, aes(x = ydl, y = avg_fg_made)) +
+  geom_point(aes(color = kq), size = 2, alpha = 0.7) +
+  geom_line(aes( y = predicted_prob), color = "black") +
+  labs(
+    x = "Field Goal Yard Lines",
+    y = "Average Field Goal Success Probability",
+    color = "Average Kicker Quality"
+  ) +
+  theme_minimal() +
+  ggtitle("Predicted Probabilities of Field Goal Success (Fitted Model)")
+```
+4.2 - bradley-terry ncaa men's basketball scores
+
+```{r}
+#1 - filter data 
+
+ncaab_results = read_csv("../data/04_ncaab-results.csv")
+ncaab_team_info = read_csv("../data/04_ncaab-teams.csv")
+
+head(ncaab_results)
+head(ncaab_team_info)
+
+ncaab_results <- ncaab_results %>%
+  filter(Season == 2023) %>% 
+  mutate(home_win = ifelse(WLoc == 'H', 1, 0)) 
+
+head(ncaab_results)
+
+```
+
+```{r}
+#2 - bradley terry model
+ncaab_named <- ncaab_results %>%
+  left_join(ncaab_team_info, by = c("WTeamID" = "TeamID")) %>%
+  rename(WTeamName = TeamName)
+
+# Merge loser names
+ncaab_named <- ncaab_named %>%
+  left_join(ncaab_team_info, by = c("LTeamID" = "TeamID")) %>%
+  rename(LTeamName = TeamName)
+
+all_teams <- sort(unique(c(ncaab_named$WTeamName, ncaab_named$LTeamName)))
+
+# Create the matrix
+home_away_matrix <- matrix(0, nrow = nrow(ncaab_named), ncol = length(all_teams))
+colnames(home_away_matrix) <- all_teams
+
+for (i in seq_len(nrow(ncaab_named))) {
+  w <- as.character(ncaab_named$WTeamName[i])
+  l <- as.character(ncaab_named$LTeamName[i])
+  loc <- ncaab_results$WLoc[i]
+  
+  if (loc == "H") {
+    home_away_matrix[i, w] <- 1
+    home_away_matrix[i, l] <- -1
+  } else if (loc == "A") {
+    home_away_matrix[i, w] <- -1
+    home_away_matrix[i, l] <- 1
+  } else if (loc == "N") {
+    home_away_matrix[i, w] <- .5
+    home_away_matrix[i, l] <- .5
+  }
+}
+
+home_away_matrix <- cbind(
+  home_advantage = ifelse(ncaab_results$WLoc == "N", 0.5, 1),
+  home_away_matrix
+)
+
+nrow(home_away_matrix)
+nrow(ncaab_named)
+
+home_away_df <- as.data.frame(home_away_matrix)
+home_away_df$home_advantage <- ifelse(ncaab_results$WLoc == "N", 0.5, 1)
+
+bradleyTerry = glm(ncaab_results$home_win ~ home_away_matrix , family = binomial())
+bradleyTerry
+
+```
+
+```{r}
+# Extract coefficients and exponentiate
+
+coeffs <- coef(bradleyTerry)
+team_coeffs <- coeffs[!names(coeffs) %in% "home_advantage"] 
+
+team_coeffs <- coeffs[!names(coeffs) %in% c("(Intercept)", "home_advantage")]
+clean_names <- gsub("^home_away_matrix", "", names(coeffs))
+
+keep_indices <- !(clean_names %in% c("home_advantage", "(Intercept)"))
+
+team_coeffs <- coeffs[keep_indices]
+team_names  <- clean_names[keep_indices]
+
+# 3. Create cleaned data frame
+coeff_df <- data.frame(
+  Team = team_names,
+  Strength = team_coeffs 
+)
+
+head(coeff_df)
+
+library(ggplot2)
+
+ggplot(coeff_df, aes(x = reorder(Team, Strength), y = Strength)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Estimated Team Strengths (Bradley-Terry Model)",
+    x = "Team",
+    y = "Strength (Odds Multiplier)"
+  ) +
+  theme_minimal()
+
+```
+```{r}
+#4 - vegas odds
+
+purdue = coeff_df %>% 
+  filter(Team == "Purdue") %>%
+  pull(Strength)
+
+purdue 
+uconn = coeff_df %>% 
+  filter(Team == "Connecticut") %>%
+  pull(Strength)
+
+uconn 
+
+
+p = 1/(1+exp(-(purdue-uconn)))
+p
+
+summary( bradleyTerry)
+```
+

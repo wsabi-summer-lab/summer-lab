@@ -1,0 +1,199 @@
+---
+title: "04_Noah"
+author: '38880242'
+date: "2025-06-05"
+output: html_document
+---
+
+#############
+### SETUP ###
+#############
+
+# install.packages(c("ggplot2", "tidyverse"))
+library(ggplot2)
+library(tidyverse)
+
+##############
+### PART 1 ###
+##############
+
+
+# load data
+```{r}
+field_goals = read_csv("../data/04_field-goals.csv")
+
+linearregressionmodel <- lm(fg_made ~ ydl + kq, data = field_goals)
+logit_model <- glm(fg_made ~ ydl + kq, data = field_goals)
+spline_lpm <- lm(fg_made ~ bs(ydl, df = 4) + kq,data   = field_goals)
+
+summary(logit_model)
+summary(linearregressionmodel)
+summary(spline_lpm)
+```
+```{r}
+
+```
+
+```{r}
+
+set.seed(123)
+n_total   <- nrow(field_goals)
+train_n   <- floor(0.7 * n_total)
+train_ix  <- sample(1:n_total, train_n, replace = FALSE)
+
+train_data <- field_goals[train_ix, ]
+test_data  <- field_goals[-train_ix, ]
+
+
+linearregressionmodel <- lm(
+  fg_made ~ ydl + kq,
+  data   = train_data      
+)
+
+logit_model <- glm(
+  fg_made ~ ydl + kq,
+  data   = train_data    
+)
+
+spline_lpm <- lm(
+  fg_made ~ bs(ydl, df = 2) + kq,
+  data   = train_data      
+)
+
+test_data$pred_lpm <- predict(linearregressionmodel, newdata = test_data, type = "response")
+test_data$pred_logit  <- predict(logit_model,        newdata = test_data, type = "response")
+test_data$pred_spline <- predict(spline_lpm,          newdata = test_data, type = "response")
+
+mse_lpm <- mean((test_data$pred_lpm    - y_true)^2)
+mse_logit <- mean((test_data$pred_logit  - y_true)^2)
+mse_spline <- mean((test_data$pred_spline - y_true)^2)
+
+```
+
+The intercept being .974 means that when both `ydl` and `kq` are zero, the model predicts a field goal made rate of above 1 
+
+Since these are splines, the coefficients of -.1119 means that holding kicker quality constant, as you move up towards the knot then the predicted field goal made rate decreases by .1119 for each unit increase in `ydl`.
+```{r}
+summary(spline_lpm)
+```
+
+```{r}
+ggplot(test_data, aes(x = pred_spline, color = factor(fg_made), fill = factor(fg_made))) +
+  geom_density() +
+  scale_x_continuous(
+    name   = "Predicted Probability",
+    limits = c(0, 1)
+  ) +
+  labs(
+    color = "Actual Outcome",
+    fill  = "Actual Outcome"
+  ) +
+  theme_minimal()
+
+
+```
+
+##############
+### PART 2 ###
+##############
+
+# load data
+
+```{r}
+ncaab_results = read_csv("../data/04_ncaab-results.csv")
+ncaab_team_info = read_csv("../data/04_ncaab-teams.csv")
+
+ncaab_23 <- ncaab_results %>%
+  filter(Season == 2023)
+
+game_bt <- ncaab_23 %>%
+  mutate(
+    HomeTeam = if_else(WLoc == "A", LTeamID, WTeamID),
+    AwayTeam = if_else(WLoc == "A", WTeamID, LTeamID),
+    y        = if_else(WLoc == "A", 0, 1),
+    beta0    = if_else(WLoc == "N", 0.5, 0)
+  ) %>%
+  select(HomeTeam, AwayTeam, y, beta0) %>%
+  mutate(
+    HomeTeam = factor(HomeTeam),
+    AwayTeam = factor(AwayTeam)
+  )
+
+all_teams <- sort(
+  unique(
+    c(
+      as.character(game_bt$HomeTeam),
+      as.character(game_bt$AwayTeam)
+    )
+  )
+)
+
+K <- length(all_teams)
+n <- nrow(game_bt)
+
+home_idx <- match(as.character(game_bt$HomeTeam), all_teams)
+away_idx <- match(as.character(game_bt$AwayTeam), all_teams)
+
+
+# 2A. Initialize an all‐zero matrix of dimension n × K
+X <- matrix(0, nrow = n, ncol = K)
+
+# 2B. Create a vector of row‐indices 1, 2, …, n
+row_ids <- seq_len(n)
+
+# 2C. Place +1 in (row_i, home_idx[i]) for every i
+X[cbind(row_ids, home_idx)] <- +1
+
+# 2D. Place –1 in (row_i, away_idx[i]) for every i
+X[cbind(row_ids, away_idx)] <- -1
+
+
+```
+
+```{r}
+y_vec     <- game_bt$y      
+beta0_vec <- game_bt$beta0  
+
+
+df_design <- as.data.frame(X)
+
+
+colnames(df_design) <- all_teams
+
+df_design$beta0 <- beta0_vec
+df_design$y     <- y_vec
+
+bt_fit <- glm(
+  y ~ beta0 + . - 1,
+  data   = df_design,
+  family = binomial(link = "logit")
+)
+
+summary(bt_fit)
+```
+
+```{r}
+team_coefs <- coef(bt_fit)[ names(coef(bt_fit)) != "beta0" ]
+
+
+df_coefs <- data.frame(
+  team     = names(team_coefs),
+  strength = as.numeric(team_coefs),
+  stringsAsFactors = FALSE
+) %>%
+  arrange(desc(strength)) %>%
+  mutate(team = factor(team, levels = team))
+
+library(ggplot2)
+ggplot(df_coefs, aes(x = team, y = strength)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs() +
+  theme_minimal()
+
+
+```
+
+
+
+
