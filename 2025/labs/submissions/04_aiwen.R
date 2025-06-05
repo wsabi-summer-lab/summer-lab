@@ -50,15 +50,15 @@ logit_train <- glm(fg_made ~ ydl + kq, data = train, family = "binomial")
 
 pred_1 <- predict(model_1_train, newdata = test)
 pred_spline <- predict(spline_train, newdata = test)
-pred_logit <- predict(logit_train, newdata = train, type = "response")
+pred_logit <- predict(logit_train, newdata = test, type = "response")
 
 # MSE
 mse_1 <- mean((test$fg_made - pred_1)^2)
 mse_spline <- mean((test$fg_made - pred_spline)^2)
-mse_logit <- mean((test_logit$prop_goals - pred_logit)^2)
+mse_logit <- mean((test$fg_made - pred_logit)^2)
 
 print(c("Linear regression model MSE" = mse_1, "Spline model MSE" = mse_spline, "Logistic regression model MSE" = mse_logit))
-# logit MSE is lowest :)
+# logit MSE is lower
 
 ## interpretation of logistic regression coefs:
 # increase in 1 yard away from opponent's end zone --> decrease in 0.1ish in log odds on average; 
@@ -185,3 +185,4 @@ cat("Estimated Vegas spread (Purdue - UConn):", round(spread_estimate, 1), "poin
 
 # probability
 prob <- 1 / (1 + exp(-(0.5 + purdue_beta - uconn_beta)))
+prob
