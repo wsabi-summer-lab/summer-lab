@@ -303,3 +303,100 @@ max_diff_nbd <- park_data_preds %>%
 max_diff_linear
 max_diff_poisson
 max_diff_nbd
+
+# Extract unique parks and teams (years used as team IDs)
+parks <- unique(park_data$PARK)
+teams <- unique(park_data$OT_YR)  # assuming OT_YR = offensive team ID (e.g. year)
+
+# Create full combination: each offensive team vs each defensive team at each park
+theoretical_games <- expand.grid(
+  PARK = parks,
+  OT_YR = teams,
+  DT_YR = teams,
+  stringsAsFactors = FALSE
+)
+
+# Make sure factors match training data levels for predictions
+theoretical_games <- theoretical_games %>%
+  mutate(
+    PARK = factor(PARK, levels = levels(park_train$PARK)),
+    OT_YR = factor(OT_YR, levels = levels(park_train$OT_YR)),
+    DT_YR = factor(DT_YR, levels = levels(park_train$DT_YR))
+  )
+
+# Predict runs per inning for each model
+theoretical_games <- theoretical_games %>%
+  mutate(
+    pred_linear = predict(park_model, newdata = ., type = "response"),
+    pred_poisson = predict(poisson_model, newdata = ., type = "response"),
+    pred_nbd = predict(nbd_model, newdata = ., type = "response")
+  )
+
+# Average predicted runs by park
+theoretical_summary <- theoretical_games %>%
+  group_by(PARK) %>%
+  summarise(
+    mean_linear = mean(pred_linear, na.rm = TRUE),
+    mean_poisson = mean(pred_poisson, na.rm = TRUE),
+    mean_nbd = mean(pred_nbd, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+# (Optional) Add actual average runs for reference
+actual_means <- park_data %>%
+  group_by(PARK) %>%
+  summarise(mean_actual = mean(INN_RUNS, na.rm = TRUE)) %>%
+  ungroup()
+
+theoretical_summary <- left_join(theoretical_summary, actual_means, by = "PARK")
+
+# Reshape for plotting
+plot_data <- theoretical_summary %>%
+  pivot_longer(cols = c(mean_linear, mean_poisson, mean_nbd, mean_actual),
+               names_to = "model",
+               values_to = "mean_runs") %>%
+  mutate(model = case_when(
+    model == "mean_linear" ~ "Linear",
+    model == "mean_poisson" ~ "Poisson",
+    model == "mean_nbd" ~ "Negative Binomial",
+    model == "mean_actual" ~ "Actual"
+  ))
+
+# Plot
+ggplot(plot_data, aes(x = reorder(PARK, mean_runs), y = mean_runs, fill = model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(
+    title = "Theoretical Mean Runs per Inning by Park (All Teams vs All Teams)",
+    x = "Park",
+    y = "Mean Runs per Inning",
+    fill = "Model"
+  ) +
+  theme_minimal()
+
+# Calculate difference from actual for each model
+diffs <- theoretical_summary %>%
+  mutate(
+    diff_linear = mean_linear - mean_actual,
+    diff_poisson = mean_poisson - mean_actual,
+    diff_nbd = mean_nbd - mean_actual,
+    abs_diff_linear = abs(diff_linear),
+    abs_diff_poisson = abs(diff_poisson),
+    abs_diff_nbd = abs(diff_nbd)
+  )
+
+# Find park with largest absolute difference for each model
+largest_diff_linear <- diffs %>% filter(abs_diff_linear == max(abs_diff_linear)) %>% 
+  dplyr::select(PARK, diff_linear)
+largest_diff_poisson <- diffs %>% filter(abs_diff_poisson == max(abs_diff_poisson)) %>% 
+  dplyr::select(PARK, diff_poisson)
+largest_diff_nbd <- diffs %>% filter(abs_diff_nbd == max(abs_diff_nbd)) %>% 
+  dplyr::select(PARK, diff_nbd)
+
+# Combine into one table for easy viewing
+largest_diffs <- tibble(
+  Model = c("Linear", "Poisson", "Negative Binomial"),
+  Park = c(largest_diff_linear$PARK, largest_diff_poisson$PARK, largest_diff_nbd$PARK),
+  Difference = c(largest_diff_linear$diff_linear, largest_diff_poisson$diff_poisson, largest_diff_nbd$diff_nbd)
+)
+
+print(largest_diffs)
