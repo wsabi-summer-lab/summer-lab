@@ -1,0 +1,192 @@
+5.1.1 simple version
+
+```{r}
+#1 mean runs scored in half-innings
+
+library(ggplot2)
+library(tidyverse)
+
+innings = read.csv("../data/05_park-effects.csv")
+head(innings, 12)
+mean_runs <- innings %>% 
+  group_by(INNING) %>%
+  summarize(mean_runs = mean(INN_RUNS, na.rm = TRUE)) %>% 
+  ungroup()
+mean_runs
+
+ggplot(mean_runs, aes(x = INNING, y = mean_runs)) +
+  geom_line() +
+  labs(title = "Mean Runs Scored in Half-Innings",
+       x = "Half-Inning",
+       y = "Mean Runs") +
+  theme_minimal()
+```
+
+5.1.3 Estimate park effects by adjusting for quality
+
+```{r}
+#1 build model 
+
+#group by park as well
+park <- innings %>%
+  group_by(PARK) %>%
+  summarize(mean_runs = mean(INN_RUNS, na.rm = TRUE)) %>%
+  ungroup() 
+
+ggplot(park, aes(x = PARK, y = mean_runs)) +
+  geom_col(fill = "steelblue") +
+  labs(
+    title = "Mean Runs per Park",
+    x = "Park",
+    y = "Mean Runs"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+#account for offensive team quality 
+offensive_effects <- innings %>%
+  group_by(INNING, OT_YR) %>%
+  summarize(mean_runs = mean(INN_RUNS, na.rm = TRUE)) %>%
+  ungroup() 
+
+offensive_effects
+
+ggplot(offensive_effects, aes(x = factor(INNING), y = OT_YR, fill = mean_runs)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(x = "Inning", y = "Offensive Team", fill = "Mean Runs") +
+  theme_minimal()
+
+#account for defensive team quality 
+defensive_effects <- innings %>%
+  group_by(INNING, DT_YR) %>%
+  summarize(mean_runs = mean(INN_RUNS, na.rm = TRUE)) %>%
+  ungroup()
+
+defensive_effects
+
+ggplot(defensive_effects, aes(x = factor(INNING), y =DT_YR, fill = mean_runs)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(x = "Inning", y = "Defensive Team", fill = "Mean Runs") +
+  theme_minimal()
+
+innings$OT_YR <- as.factor(innings$OT_YR)
+innings$DT_YR <- as.factor(innings$DT_YR)
+innings$PARK  <- as.factor(innings$PARK)
+model <- lm(INN_RUNS ~ OT_YR + DT_YR + PARK, data = innings)
+model
+
+
+```
+
+```{r}
+# visualize
+
+park_effects <- coef(model)[grep("PARK", names(coef(model)))]
+park_effects_df <- data.frame(
+  park = gsub("^PARK", "", names(park_effects)),
+  effect = as.numeric(park_effects)
+)
+
+ggplot(park_effects_df, aes(x = reorder(park, effect), y = effect)) +
+  geom_col(fill = "tomato") +
+  coord_flip() +
+  labs(title = "Estimated Park Effects on Run Scoring",
+       x = "Park",
+       y = "Effect on Mean Runs") +
+  theme_minimal()
+
+
+#Compare model to previous model 
+
+#add previous model info to data frame
+predicted_means <- innings %>%
+  group_by(INNING) %>%
+  summarize(predicted_runs = mean(predicted_runs, na.rm = TRUE))
+mean_vs_predicted <- mean_runs %>%
+  left_join(predicted_means, by = "INNING")
+
+innings$predicted_runs <- predict(model, newdata = innings)
+
+ggplot(mean_vs_predicted, aes(x = mean_runs, y = predicted_runs)) +
+  geom_point(size = 3, color = "darkorange") +
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+  labs(
+    title = "Mean Actual vs Predicted Runs by Inning",
+    x = "Mean Actual Runs",
+    y = "Mean Predicted Runs"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+
+# 3 out of sample predictive performance for model
+
+park_lm = lm(INN_RUNS ~PARK, data = innings)
+
+performance = function(formula, data,  test_frac = .2) {
+  set.seed(42)
+  n <- nrow(data)
+  test_idx <- sample(1:n, size = test_frac * n)
+  
+  train <- data[-test_idx, ]
+  test <- data[test_idx, ]
+  
+  model <- lm(formula = formula, data = train)
+  
+  test$predicted_runs = predict(model, newdata = test)
+  residuals = test$INN_RUNS - test$predicted_runs
+  ROE = 1 - sd(residuals) / sd(test$INN_RUNS)
+  return(ROE)
+}
+
+innings$park_predicted_runs <- predict(park_lm, newdata = innings)
+
+performance(INN_RUNS ~ PARK, innings)
+performance(INN_RUNS ~ OT_YR + DT_YR + PARK, innings)
+
+```
+
+```{r}
+# 4 - which park has the greatest difference between the two estimates
+
+mean= mean(innings$INN_RUNS, na.rm = TRUE)
+
+effects_a <- park_effects_df %>%
+  mutate(total_a = effect + mean)
+
+effects_b <- coef(park_lm)[grep("^PARK", names(coef(park_lm)))]
+parks_b <- data.frame(
+  park = gsub("^PARK", "", names(effects_b)),
+  effect_model_b = as.numeric(effects_b)
+) %>%
+  mutate(total_b = effect_model_b + mean)
+
+park_compare <- inner_join(effects_a, parks_b, by = "park")
+park_compare <- park_compare %>%
+  mutate(diff = total_a - total_b)
+
+top10 <- park_compare %>%
+  arrange(desc(total_a)) %>%
+  slice_head(n = 10) %>%
+  select(park, total_a, total_b) %>%
+  pivot_longer(cols = c("total_a", "total_b"), names_to = "model", values_to = "estimated_runs")
+
+ggplot(park_compare, aes(x = reorder(park, diff), y = diff)) +
+  geom_col(fill = "darkorange") +
+  coord_flip() +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(
+    title = "Difference in Estimated Park Effects: Model A vs Model B",
+    x = "Park",
+    y = "Difference in Predicted Mean Runs (A-B)"
+  ) +
+  theme_minimal()
+
+
+```
+
