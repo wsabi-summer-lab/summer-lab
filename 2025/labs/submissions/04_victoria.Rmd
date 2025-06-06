@@ -232,6 +232,5 @@ uconn
 p = 1/(1+exp(-(purdue-uconn)))
 p
 
-summary( bradleyTerry)
 ```
 
