@@ -186,3 +186,4 @@ cat("Estimated Vegas spread (Purdue - UConn):", round(spread_estimate, 1), "poin
 # probability
 prob <- 1 / (1 + exp(-(0.5 + purdue_beta - uconn_beta)))
 prob
+# why 0.68?
