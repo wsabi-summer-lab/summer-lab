@@ -1,0 +1,279 @@
+---
+title: "05_Maximilian"
+author: "Maximilian J. Gebauer"
+date: "2025-06-06"
+output: html_document
+---
+
+```{r Setup, include=FALSE, results='hide', warning=FALSE}
+knitr::opts_chunk$set(echo = T, fig.width=8, fig.height=4)
+options(scipen = 0, digits = 3)  # controls base R output
+
+# Package setup
+if(!require("pacman")) install.packages("pacman")
+
+pacman::p_load(tidyverse, dplyr, ggthemes, data.table, lubridate, glmnet,
+               GGally, RColorBrewer, ggsci, plotROC, usmap,
+               plotly, ggpubr, vistime, coefplot, skimr, car, ggrepel, slider, lubridate,
+               tidymodels,ranger,vip,ggplot2, tune,dials,pdp, purrr, stringr, lmtest,
+               sandwich, Lahman)
+```
+
+```{r}
+#loading data set
+park_data <- read_csv("../data/05_park-effects.csv")
+```
+
+```{r}
+#setting variable natures to aid modeling 
+park_data$PARK <- as.factor(park_data$PARK)
+park_data$BAT_HOME_IND <- as.factor(park_data$BAT_HOME_IND)
+park_data$OT_YR <- as.factor(park_data$OT_YR)
+park_data$DT_YR <- as.factor(park_data$DT_YR)
+```
+
+```{r}
+#perform 80-20 train-test split for comparing OOS performance between two models 
+set.seed(654)
+
+n <- nrow(park_data)
+
+train_prop <- .8
+train_size <- round(n * train_prop)
+
+train_indices <- sample(1:n, train_size)
+
+train_data <- park_data[train_indices, ]
+
+test_data <- park_data[-train_indices, ]
+```
+
+
+A problem with the naive estimates is they do not control for team strength and since teams play about half their teams at home, the naive estimate of the park effect risks being highly inlfuenced by the home team's offensive and defensive strength.
+
+
+```{r}
+#Produce Naive Estimates of Park Effects, No controls 
+train_data %>%
+  group_by(as.factor(PARK)) %>%
+  summarise(
+    Mean_RS_HalfInning = mean(INN_RUNS)
+  )
+```
+
+```{r,warning=FALSE,message=FALSE,fig.width=10,fig.height=6}
+#plot raw estimates from naive model
+train_data %>%
+  group_by(PARK) %>%
+  summarise(
+    Mean_RS_HalfInning = mean(INN_RUNS)
+  ) %>%
+  ggplot(aes(x = reorder(PARK, -Mean_RS_HalfInning), y = Mean_RS_HalfInning)) +
+  geom_col() +
+  coord_flip() +
+  labs(x = "Park", y = "Mean Runs per Half Inning") +
+  theme_minimal()
+```
+
+
+```{r}
+#Model 1 regresses runs scored per half inning on Park, controlling for Offensive and Defensive team identities and employing an indicator variable for whether batting team is home or away
+model_1 <- lm(INN_RUNS ~ BAT_HOME_IND + OT_YR + DT_YR + PARK + 0, data = train_data)
+```
+
+```{r}
+summary <- summary(model_1)
+```
+
+```{r}
+#get coefficients from model, extract park-specific coefficients
+coefs <- coef(model_1)
+park_coefs <- coefs[181:209]
+park_coefs
+```
+
+```{r,warning=FALSE,message=FALSE,fig.width=10,fig.height=6}
+#generate plot of park coefficents 
+park_df <- data.frame(
+  park = names(park_coefs),
+  coef = as.numeric(park_coefs),
+  stringsAsFactors = FALSE
+)
+
+park_df$park <- factor(
+  park_df$park,
+  levels = park_df$park[order(park_df$coef)]
+)
+
+ggplot(park_df, aes(x = park, y = coef, fill = coef > 0)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(
+    name   = "Sign",
+    values = c(`TRUE` = "steelblue", `FALSE` = "firebrick"),
+    labels = c("Negative", "Positive")
+  ) +
+  labs(
+    x     = "Park Identifier",
+    y     = "Coefficient",
+    title = "Coefficients for Each Park (model_1)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title   = element_text(hjust = 0.5, face = "bold"),
+    axis.text.y  = element_text(size = 10),
+    axis.title   = element_text(size = 12),
+    legend.title = element_text(size = 10),
+    legend.text  = element_text(size = 9)
+  )
+```
+
+
+Visual comparison of the two model's PARK coefficient estimates.
+
+
+```{r,warning=FALSE,message=FALSE,fig.width=10,fig.height=6}
+#center naive model estimates to make them comensurable with the model_1 park coefficients, then plot to compare by Park
+park_df <- data.frame(
+  RawName = names(park_coefs),
+  Coef    = as.numeric(park_coefs),
+  stringsAsFactors = FALSE
+)
+
+park_df <- park_df %>%
+  mutate(
+    PARK = sub("^PARK", "", RawName)   
+  ) %>%
+  select(PARK, Coef)
+
+
+mean_df <- park_data %>%
+  group_by(PARK) %>%
+  summarise(
+    Mean_RS_HalfInning = mean(INN_RUNS, na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  # Compute overall average of the naive means, then center:
+  mutate(
+    Overall_Mean = mean(Mean_RS_HalfInning),
+    Mean_Centered = Mean_RS_HalfInning - Overall_Mean
+  ) %>%
+  select(PARK, Mean_Centered)
+
+
+combined_df <- inner_join(
+  park_df,
+  mean_df,
+  by = "PARK"
+)
+
+combined_long <- combined_df %>%
+  pivot_longer(
+    cols      = c(Coef, Mean_Centered),
+    names_to  = "Metric",
+    values_to = "Value"
+  )
+
+park_order <- combined_df %>%
+  arrange(desc(Coef)) %>%
+  pull(PARK)
+
+combined_long <- combined_long %>%
+  mutate(
+    PARK = factor(PARK, levels = park_order)
+  )
+
+
+ggplot(combined_long, aes(x = PARK, y = Value, fill = Metric)) +
+  geom_col(position = "dodge", width = 0.75) +
+  coord_flip() +
+  scale_fill_manual(
+    values = c(
+      Coef          = "steelblue",
+      Mean_Centered = "forestgreen"
+    ),
+    labels = c(
+      Coef          = "Estimated Park Coefficient",
+      Mean_Centered = "Centered Mean Runs per Half Inning"
+    )
+  ) +
+  labs(
+    x     = "Park",
+    y     = "Value (Centered for Mean Runs)",
+    fill  = "Metric",
+    title = "Comparison: Park Coefficients vs. Centered Mean Runs per Half Inning"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title        = element_text(size = 12, hjust = 0.5, face = "bold"),
+    axis.text.y       = element_text(size = 10),
+    axis.title        = element_text(size = 12),
+    legend.title      = element_text(size = 10),
+    legend.text       = element_text(size =  9),
+    panel.grid.major.y = element_blank()
+  )
+```
+
+```{r}
+#generate predictions on test data for held out data
+preds <- predict(model_1, newdata = test_data)
+```
+
+```{r}
+#compute rmse for model 1 predictions on test data
+(rmse <- sqrt(mean((preds - test_data$INN_RUNS)^2)))
+```
+
+```{r}
+#set up data for rmse for naive model
+training_naive_coefs <- train_data %>%
+  group_by(as.factor(PARK)) %>%
+  summarise(
+    Mean_RS_HalfInning = mean(INN_RUNS)
+  )
+
+colnames(training_naive_coefs) <- c("PARK","Coefficient")
+test_data1 <- test_data
+merged_left <- test_data1 %>%
+  left_join(training_naive_coefs, by = "PARK")
+```
+
+```{r}
+#compute rmse for naive model on test data
+results <- merged_left %>%
+  mutate(
+    sq_Diff_pergame = (INN_RUNS - Coefficient)^2
+  ) %>%
+  group_by(PARK) %>%
+  summarise(
+    Mean_Diff = mean(sq_Diff_pergame, na.rm = TRUE)
+  )
+
+
+(rmse2 <- sqrt(mean(results$Mean_Diff^2)))
+```
+
+
+On the same held-out test data, model_1 has smaller rmse compared to the naive model (1.06 versus 1.14, respectively).
+
+
+
+Below we show the top 10 disparities between the two models.
+
+```{r}
+#Extract top 10 disparities between the two models
+finalq_df <- combined_df
+
+finalq_df %>%
+  mutate(
+    Abs_Diff = abs(Coef - Mean_Centered)
+    ) %>%
+  arrange(desc(Abs_Diff)) %>%
+  select(PARK,Abs_Diff) %>%
+  slice(1:10)
+```
+
+
+
+
+
