@@ -35,7 +35,7 @@ EP_1 <- predict(fit_1, newdata = YL_data, type = "probs")
 # Compute expected points at each yard line
 # Make sure the column names of 'probs' are the possible next scores
 score_values <- as.numeric(colnames(EP_1))
-YL_data$EP_YDmod <- as.numeric(probs %*% score_values)
+YL_data$EP_YDmod <- as.numeric(EP_1 %*% score_values)
 
 # Plot
 ggplot(YL_data, aes(x = YL, y = EP_YDmod)) +
@@ -80,6 +80,18 @@ ggplot(YL_downs_data, aes(x = YL, y = EP_YLdown, color = factor(down))) +
   ) +
   theme_minimal()
 #1.4  yard line, down, and yards to go
+fit_4 <- multinom(
+  EP ~ bs(YL, df = 5) + factor(down) + log1p(YTG),
+  data = nfl_data
+)
+YL_downs_YTG_data <- expand_grid(
+  YL = seq(0, 100, by = 2),
+  down = 1:4,
+  YTG = seq(1, 20, by = 1)
+)
+EP_4 <- predict(fit_4, newdata = YL_downs_YTG_data, type = "probs")
+score_values <- as.numeric(colnames(EP_4))
+YL_downs_YTG_data$EP_YLdownYTG <- as.numeric(EP_4 %*% score_values)
 ggplot(YL_downs_YTG_data, aes(
   x = YL,
   y = EP_YLdownYTG,
