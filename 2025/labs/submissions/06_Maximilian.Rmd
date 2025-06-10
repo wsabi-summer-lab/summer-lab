@@ -1,0 +1,326 @@
+---
+title: "06_Maximilian"
+author: "Maximilian J. Gebauer"
+date: "2025-06-09"
+output: html_document
+---
+
+```{r Setup, include=FALSE, results='hide', warning=FALSE}
+knitr::opts_chunk$set(echo = T, fig.width=8, fig.height=4)
+options(scipen = 0, digits = 3)  # controls base R output
+
+# Package setup
+if(!require("pacman")) install.packages("pacman")
+
+pacman::p_load(tidyverse, dplyr, ggthemes, data.table, lubridate, glmnet,
+               GGally, RColorBrewer, ggsci, plotROC, usmap,
+               plotly, ggpubr, vistime, coefplot, skimr, car, ggrepel, slider, lubridate,
+               tidymodels,ranger,vip,ggplot2, tune,dials,pdp, purrr, stringr, lmtest,
+               sandwich, nnet)
+```
+
+```{r}
+nfl_data <- read_csv("../data/06_expected-points.csv")
+nfl_data$pts_next_score <- as.factor(nfl_data$pts_next_score)
+```
+
+```{r}
+model1 <- nnet::multinom(pts_next_score ~ yardline_100, data = nfl_data)
+```
+
+```{r}
+model1_fits <- as.data.frame(model1$fitted.values)
+```
+
+```{r}
+model1_ep <- model1_fits %>%
+  mutate(expected_points = `-2` * -2 + `-3` * -3 + `-7` * -7 + `0` * 0 + `2` * 2 + `3` * 3 + `7` * 7) %>%
+  select(expected_points)
+```
+
+```{r}
+m1_results <- cbind(model1_ep$expected_points,nfl_data$yardline_100) %>%
+  as.data.frame()
+```
+
+```{r}
+colnames(m1_results) <- c("expected_points", "yardline_100")
+```
+
+
+Plot is below. A problem is our model is insensitive to the down and the yards to go for a first down. A 1st and 10 and a 4th and ten for the 30 are a priori vastly different game states re: expected points.
+
+
+```{r}
+plot(m1_results$yardline_100, m1_results$expected_points,
+     xlab = "Yardline", ylab = "Expected Points",
+     main = "Expected Points by Yardline",
+     pch = 19, col = "blue", cex = 0.5)
+```
+
+```{r}
+model2 <- nnet::multinom(pts_next_score ~ splines::bs(yardline_100, df=5, degree=3), data = nfl_data)
+```
+```{r}
+summary(model2)
+```
+
+
+
+```{r}
+model2_fits <- as.data.frame(model2$fitted.values)
+```
+
+```{r}
+model2_ep <- model2_fits %>%
+  mutate(expected_points = `-2` * -2 + `-3` * -3 + `-7` * -7 + `0` * 0 + `2` * 2 + `3` * 3 + `7` * 7) %>%
+  select(expected_points)
+```
+
+```{r}
+m2_results <- cbind(model2_ep$expected_points,nfl_data$yardline_100) %>%
+  as.data.frame()
+```
+
+```{r}
+colnames(m2_results) <- c("expected_points", "yardline_100")
+```
+
+New plot with splines.
+
+```{r}
+plot(m2_results$yardline_100, m2_results$expected_points,
+     xlab = "Yardline", ylab = "Expected Points",
+     main = "Expected Points by Yardline",
+     pch = 19, col = "blue", cex = 0.5)
+```
+
+```{r}
+nfl_data$down <- as.factor(nfl_data$down)
+```
+
+```{r}
+model3 <- nnet::multinom(pts_next_score ~ yardline_100 + down, data = nfl_data)
+```
+
+```{r}
+model3_fits <- as.data.frame(model3$fitted.values)
+```
+
+```{r}
+model3_ep <- model3_fits %>%
+  mutate(expected_points = `-2` * -2 + `-3` * -3 + `-7` * -7 + `0` * 0 + `2` * 2 + `3` * 3 + `7` * 7) %>%
+  select(expected_points)
+```
+
+```{r}
+m3_results <- cbind(model3_ep$expected_points,nfl_data$yardline_100, nfl_data$down) %>%
+  as.data.frame()
+```
+
+```{r}
+colnames(m3_results) <- c("expected_points", "yardline_100", "down")
+m3_results$down <- as.factor(m3_results$down)
+```
+
+
+Plot with downs and yardline as features in the model, faceting by down.
+
+
+```{r}
+ggplot(m3_results,aes(x=yardline_100, y=expected_points, group=down)) +
+  geom_point(aes(color=down)) +
+  labs(x = "Yardline", y = "Expected Points", title = "Expected Points by Yardline and Down") +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+```
+
+```{r}
+model4 <- nnet::multinom(pts_next_score ~ splines::bs(yardline_100, df=5, degree=3) + splines::bs(ydstogo, df=5, degree=3) + down, data = nfl_data)
+```
+
+```{r}
+model4_fits <- as.data.frame(model4$fitted.values)
+```
+
+```{r}
+model4_ep <- model4_fits %>%
+  mutate(expected_points = `-2` * -2 + `-3` * -3 + `-7` * -7 + `0` * 0 + `2` * 2 + `3` * 3 + `7` * 7) %>%
+  select(expected_points)
+```
+
+```{r}
+m4_results <- cbind(model4_ep$expected_points,nfl_data$yardline_100, nfl_data$down, nfl_data$ydstogo) %>%
+  as.data.frame()
+```
+
+```{r}
+colnames(m4_results) <- c("expected_points", "yardline_100", "down", "yards_to_go")
+m4_results$down <- as.factor(m4_results$down)
+```
+
+Plotwith yardline, down, and yards to go with degree-3 splines (1 knot each) for the two numeric feature. Faceted by down and points colored by yards to go.
+
+```{r}
+ggplot(m4_results,aes(x=yardline_100, y=expected_points)) +
+  geom_point(aes(color=yards_to_go), alpha=0.1) +
+  labs(x = "Yardline", y = "Expected Points", title = "Expected Points by Yardline and Down") +
+  theme_minimal() +
+  theme(legend.title = element_blank()) +
+  facet_wrap(~down)
+```
+
+```{r}
+model5 <- nnet::multinom(pts_next_score ~ splines::bs(yardline_100, df=5, degree=3) + splines::bs(ydstogo, df=5, degree=3) + half_seconds_remaining + down, data = nfl_data)
+```
+
+```{r}
+model5_fits <- as.data.frame(model5$fitted.values)
+```
+
+```{r}
+model5_ep <- model5_fits %>%
+  mutate(expected_points = `-2` * -2 + `-3` * -3 + `-7` * -7 + `0` * 0 + `2` * 2 + `3` * 3 + `7` * 7) %>%
+  select(expected_points)
+```
+
+```{r}
+m5_results <- cbind(model5_ep$expected_points,nfl_data$yardline_100, nfl_data$down, nfl_data$ydstogo, nfl_data$half_seconds_remaining) %>%
+  as.data.frame()
+```
+
+```{r}
+colnames(m5_results) <- c("expected_points", "yardline_100", "down", "yards_to_go", "half_seconds")
+m5_results$down <- as.factor(m5_results$down)
+```
+
+```{r}
+m5_results_sub <- m5_results %>%
+  filter(down == "1" & yards_to_go == 10)
+```
+
+Plot for EP with features: yardline, yards to go, down, and seconds until end of half. Plot only for 1st and 10 data. (No splines)
+
+```{r}
+ggplot(m5_results_sub,aes(x=yardline_100, y=expected_points)) +
+  geom_point(aes(color=half_seconds), alpha=0.1)
+```
+
+```{r}
+model6 <- nnet::multinom(pts_next_score ~ splines::bs(yardline_100, df=5, degree=3) + splines::bs(ydstogo, df=5, degree=3) + splines::bs(half_seconds_remaining, df=5, degree=3) + down, data = nfl_data)
+```
+
+```{r}
+model6_fits <- as.data.frame(model6$fitted.values)
+```
+
+```{r}
+model6_ep <- model6_fits %>%
+  mutate(expected_points = `-2` * -2 + `-3` * -3 + `-7` * -7 + `0` * 0 + `2` * 2 + `3` * 3 + `7` * 7) %>%
+  select(expected_points)
+```
+
+```{r}
+m6_results <- cbind(model6_ep$expected_points,nfl_data$yardline_100, nfl_data$down, nfl_data$ydstogo, nfl_data$half_seconds_remaining) %>%
+  as.data.frame()
+```
+
+```{r}
+colnames(m6_results) <- c("expected_points", "yardline_100", "down", "yards_to_go", "half_seconds")
+m6_results$down <- as.factor(m6_results$down)
+```
+
+```{r}
+m6_results_sub <- m6_results %>%
+  filter(down == "1" & yards_to_go == 10)
+```
+
+Plot for EP with features: yardline, yards to go, down, and seconds until end of half. Plot only for 1st and 10 data. (Splines for all numeric features)
+
+```{r}
+ggplot(m6_results_sub,aes(x=yardline_100, y=expected_points)) +
+  geom_point(aes(color=half_seconds), alpha=0.1)
+```
+
+
+
+
+```{r}
+model7 <- nnet::multinom(pts_next_score ~ splines::bs(yardline_100, df=5, degree=3) + splines::bs(ydstogo, df=5, degree=3) + splines::bs(half_seconds_remaining, df=5, degree=3) + posteam_spread + down, data = nfl_data)
+```
+
+```{r}
+data_sub <- nfl_data
+data_sub <- data_sub %>%
+  select(-posteam_spread) %>%
+  mutate(
+    posteam_spread = ifelse(yardline_100 < 200, 1, 0)
+  )
+```
+
+```{r}
+m7_preds <- predict(model7, newdata = data_sub, type = "prob")
+```
+
+```{r}
+model7_fits <- as.data.frame(m7_preds)
+```
+
+```{r}
+model7_ep <- model7_fits %>%
+  mutate(expected_points = `-2` * -2 + `-3` * -3 + `-7` * -7 + `0` * 0 + `2` * 2 + `3` * 3 + `7` * 7) %>%
+  select(expected_points)
+```
+
+```{r}
+m7_results <- cbind(model7_ep$expected_points,nfl_data$yardline_100, nfl_data$down, nfl_data$ydstogo, nfl_data$half_seconds_remaining) %>%
+  as.data.frame()
+```
+
+```{r}
+colnames(m7_results) <- c("expected_points", "yardline_100", "down", "yards_to_go", "half_seconds")
+m7_results$down <- as.factor(m7_results$down)
+```
+
+```{r}
+model8 <- nnet::multinom(pts_next_score ~ splines::bs(yardline_100, df=5, degree=3) + splines::bs(ydstogo, df=5, degree=3) + splines::bs(half_seconds_remaining, df=5, degree=3) + down, data = nfl_data)
+```
+
+```{r}
+model8_fits <- as.data.frame(model8$fitted.values)
+```
+
+```{r}
+model8_ep <- model8_fits %>%
+  mutate(expected_points = `-2` * -2 + `-3` * -3 + `-7` * -7 + `0` * 0 + `2` * 2 + `3` * 3 + `7` * 7) %>%
+  select(expected_points)
+```
+
+```{r}
+m8_results <- cbind(model8_ep$expected_points,nfl_data$yardline_100, nfl_data$down, nfl_data$ydstogo, nfl_data$half_seconds_remaining) %>%
+  as.data.frame()
+```
+
+```{r}
+colnames(m8_results) <- c("expected_points", "yardline_100", "down", "yards_to_go", "half_seconds")
+m8_results$down <- as.factor(m8_results$down)
+```
+
+
+The two model predictions differ slighlty, since the model with the spread feature was trained on the true spread values, forcing all observations to then be 0 point spread before generating predictive values will differ from the prediction set generated from the otherwise identical model without the spread feature. The model with the spread feature will have a different intercept and slope for the yardline, yards to go, and seconds remaining features, as the model with the spread feature was trained on the true spread values, while the model without the spread feature was trained on a constant value of 0 for all observations. This can be seen in the plots below.
+
+```{r}
+ggplot(m7_results,aes(x=yardline_100, y=expected_points)) +
+  geom_point(aes(color=half_seconds), alpha=0.1) +
+  labs(title="Model with point spread feature but all observations set to 0")
+
+ggplot(m8_results,aes(x=yardline_100, y=expected_points)) +
+  geom_point(aes(color=half_seconds), alpha=0.1) +
+  labs(title="Model with no point spread feature")
+```
+
+
+League average 3-point shooting percentage and an average player's shooting percentage represent distinct quantities. The league average aggreagted across all shooters and shots with no adjustment for the fact that players have vastly different 3-point attempts per game, meaning that players who take relatively many 3-point shots/game influence the league average more than players who take few 3-point shots. An ``average" player's true 3-point shooting percentage is with respect to all players with at least one 3-point attempt, with no differential weighting for shot count by player (expected left skew for player-level distribution). 
+
+We would expect the aggreagte 3-point shooting percentage for the league to be higher than an average player, as the league average is likely to be influenced heavily by the best 3-point shooters in the leauge who are likely to both take more 3-point shots per game than most players and make a greater fraction of them. Since our aggreagted data ignores differential weightining of different skill shooters, and is likely "brought up" by the best/better shooters, it is liekly higher than an average players 3-point shooting percentage. Likewise, we expect the "average" player's metric to be lower than the league average as the precence of low propensity 3-point shooters will bring the player-level average down as a shooter who takes a singular 3 counts just as much in determining the player-level distribution as a high propensity shooter like Curry.
+
