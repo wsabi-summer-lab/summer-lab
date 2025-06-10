@@ -8,6 +8,9 @@ library(nnet)
 library(splines)
 library(tidyverse)
 
+# set seed
+set.seed(6)
+
 #######################
 ### EXPECTED POINTS ###
 #######################

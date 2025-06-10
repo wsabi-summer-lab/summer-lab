@@ -6,6 +6,9 @@
 library(ggplot2)
 library(tidyverse)
 
+# set seed
+set.seed(4)
+
 ##############
 ### PART 1 ###
 ##############
