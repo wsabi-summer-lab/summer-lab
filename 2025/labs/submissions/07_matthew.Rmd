@@ -1,0 +1,105 @@
+---
+title: "07-matthew"
+author: "Matthew Spivey"
+date: "2025-06-10"
+output: html_document
+---
+
+#############
+### SETUP ###
+#############
+
+# install.packages(c("ggplot2", "splines", "tidyverse"))
+
+```{r}
+library(ggplot2)
+library(splines)
+library(tidyverse)
+```
+
+
+#########################
+### PERMUTATION TESTS ###
+#########################
+
+# load data
+```{r}
+diving_data = read_csv("../data/07_diving.csv")
+glimpse(diving_data)
+```
+# inspect data
+```{r}
+unique(colnames(diving_data))
+ggplot(diving_data, aes(x = Country, y = JScore)) +
+  geom_boxplot() +
+  labs(title = "Diving Scores by country",
+       x = "Country",
+       y = "Score") +
+  theme_minimal()
+```
+```{r}
+diving_disc <- diving_data %>%
+  group_by(Round, DiveNo, Diver, Event) %>%
+  mutate(mean_score = mean(JScore, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(Discrepency = JScore - mean_score,
+         CMatch = ifelse(Country == JCountry, 1, 0))
+
+unique_judges = unique(diving_disc$Judge)
+true_dods = c()
+p_values = c()
+
+for (j in unique_judges) {
+  
+  judge_data <- diving_disc %>% filter(Judge == j)
+  
+  match_disc <- mean(judge_data$Discrepency[judge_data$CMatch == 1], na.rm = TRUE)
+  unmatch_disc <- mean(judge_data$Discrepency[judge_data$CMatch == 0], na.rm = TRUE)
+  true_dod <- match_disc - unmatch_disc
+  true_dods <- c(true_dods, true_dod)
+  
+  perm_dods <- c()
+  
+  for (i in 1:10000) {
+    perm_CMatch <- sample(judge_data$CMatch)
+    
+    perm_match <- mean(judge_data$Discrepency[perm_CMatch == 1], na.rm = TRUE)
+    perm_unmatch <- mean(judge_data$Discrepency[perm_CMatch == 0], na.rm = TRUE)
+    
+    # Replace NAs with 0 if needed
+    perm_match <- ifelse(is.na(perm_match), 0, perm_match)
+    perm_unmatch <- ifelse(is.na(perm_unmatch), 0, perm_unmatch)
+    
+    perm_dod <- perm_match - perm_unmatch
+    perm_dods <- c(perm_dods, perm_dod)
+  }
+  
+  p_value <- mean(perm_dods >= true_dod, na.rm = TRUE)
+  p_values <- c(p_values, p_value)
+}
+
+p_values
+
+```
+
+
+############################
+### PARAMETRIC INFERENCE ###
+############################
+
+# load data
+```{r}
+mlb_data = read_csv("../data/07_tto.csv")
+glimpse(mlb_data)
+model1<-lm(EVENT_WOBA_19~factor(ORDER_CT)+WOBA_FINAL_BAT_19+WOBA_FINAL_PIT_19+factor(HAND_MATCH)+factor(BAT_HOME_IND),data=mlb_data)
+model2<-lm(EVENT_WOBA_19~factor(ORDER_CT)+WOBA_FINAL_BAT_19+WOBA_FINAL_PIT_19+factor(HAND_MATCH)+factor(BAT_HOME_IND)+BATTER_SEQ_NUM,data=mlb_data)
+
+unique(mlb_data$BATTER_SEQ_NUM)
+
+unique(mlb_data$ORDER_CT)
+summary(model1)
+
+summary(model2)
+```
+## The P-Values are the probability of observing a test statistic as extreme as the one computed from the data, assuming the null hypothesis is true. In this case, the null hypothesis is that the value of the coeffeicient Beta is 0, so we know for p-values that are low that it is unlikely that we saw what we saw if the null hypothesis is true.
+## The data shows that SEQ_NUM is significant, so we hypothesize that the TTO is not as important a factor as the continuous decline a pitcher has throughout the game, while the ORDER_CT coefficients are actually negative (not significantly), meaning the data doesn't support the TTO idea
