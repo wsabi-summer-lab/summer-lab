@@ -1,0 +1,103 @@
+---
+title: "Lab 7"
+output:
+  pdf_document: default
+  html_document: default
+date: "2025-06-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+Diving
+
+```{r dive, echo = FALSE, message = FALSE}
+library(tidyverse)
+library(readr)
+library(purrr)
+library(broom)
+diving_data = read_csv("../data/07_diving.csv")
+
+data = diving_data %>%
+  group_by(Diver, DiveNo, Round, Event) %>%
+  mutate(avg_score = mean(JScore, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  mutate(disc = JScore - avg_score)
+
+
+# make a permutatin test for each judge comparing the disc for competitors that match country vs those that do not
+
+Judge = unique(data$Judge)
+
+p_values = c()
+judge_dods =c()
+set.seed(123)
+
+for (judge in Judge) {
+  judge_data = data %>% filter(Judge == judge)
+  
+    # Get the competitors from the same country
+    same_country = judge_data %>% filter(Country == JCountry)
+    same_disc = same_country$disc
+    
+    # Get the competitors from different countries
+    different_country = judge_data %>% filter(Country != JCountry)
+    diff_disc = different_country$disc
+    
+    judge_dod = mean(same_disc) - mean(diff_disc)
+    judge_dods = c(judge_dods, judge_dod)
+    
+    perm_dod = c()
+    
+    for (i in 1:1000) {
+      # Shuffle the countries 
+      judge_data$Country = sample(judge_data$Country)
+      
+      # Get the competitors from the same country
+      same_country = judge_data %>% filter(Country == JCountry)
+      same_disc = same_country$disc
+    
+      # Get the competitors from different countries
+      different_country = judge_data %>% filter(Country != JCountry)
+      diff_disc = different_country$disc
+      
+      # Calculate the difference in means
+      perm_dod[i] = mean(same_disc) - mean(diff_disc)
+    }
+    
+    pvalue = mean(perm_dod >= judge_dod)
+    p_values = c(p_values, pvalue)
+   
+    
+  
+}
+results = data.frame(Judge = Judge, p_value = p_values, judge_dod = judge_dods)
+results %>% 
+  arrange(p_value)
+```
+Alt, Mena , Zaitsev, and Barnett all have a pvalue of 0.000, suggesting strong bias. others also have very low pvalues, but those are the worst
+
+
+Beisbol
+
+```{r pressure, echo=FALSE}
+mlb_data = read.csv("../data/07_tto.csv")
+model1 = lm(EVENT_WOBA_19 ~ factor(ORDER_CT) + WOBA_FINAL_BAT_19 + WOBA_FINAL_PIT_19 + factor(HAND_MATCH) + factor(BAT_HOME_IND), data = mlb_data)
+
+model2 = lm(EVENT_WOBA_19 ~ factor(ORDER_CT) + WOBA_FINAL_BAT_19 + WOBA_FINAL_PIT_19 + factor(HAND_MATCH) + factor(BAT_HOME_IND) + BATTER_SEQ_NUM, data = mlb_data)
+
+```
+
+```{r, message=FALSE, echo = FALSE}
+summary(model1)
+summary(model2)
+
+```
+in model one, all p values besides hand_match 0.5 are significant. however, in model 2, 
+neither order_ct variables are significant at all any more. batter_seq_num is significant, implying that that is what is actually significant, with the count variables acting as a proxy for that in model1.
+```{r}
+```
+

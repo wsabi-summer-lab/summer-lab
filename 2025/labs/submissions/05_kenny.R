@@ -127,7 +127,7 @@ comparison_df <- comparison_df %>%
   mutate(
     model_vs_avg_diff = Effect - diff_from_league_avg,
     abs_diff = abs(model_vs_avg_diff)
-  )
+)
 
 biggest_differences <- comparison_df %>%
   arrange(desc(abs_diff))

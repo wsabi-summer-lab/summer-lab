@@ -7,6 +7,8 @@ library(ggplot2)
 library(splines)
 library(tidyverse)
 
+# set seed
+set.seed(7)
 
 #########################
 ### PERMUTATION TESTS ###

@@ -1,0 +1,222 @@
+---
+title: "07_Maximilian"
+author: "Maximilian J. Gebauer"
+date: "2025-06-10"
+output: html_document
+---
+
+```{r Setup, include=FALSE, results='hide', warning=FALSE}
+knitr::opts_chunk$set(echo = T, fig.width=8, fig.height=4)
+options(scipen = 0, digits = 3)  # controls base R output
+
+# Package setup
+if(!require("pacman")) install.packages("pacman")
+
+pacman::p_load(tidyverse, dplyr, ggthemes, data.table, lubridate, glmnet,
+               GGally, RColorBrewer, ggsci, plotROC, usmap,
+               plotly, ggpubr, vistime, coefplot, skimr, car, ggrepel, slider, lubridate,
+               tidymodels,ranger,vip,ggplot2, tune,dials,pdp, purrr, stringr, lmtest,
+               sandwich, nnet)
+```
+
+```{r}
+diving_data <- read_csv("../data/07_diving.csv")
+dive_sub <- diving_data %>%
+  select(Diver, Country, DiveNo, JScore, Judge, JCountry, Round, Event)
+#dive_sub$Diver <- as.factor(dive_sub$Diver)
+#dive_sub$Country <- as.factor(dive_sub$Country)
+#dive_sub$Judge <- as.factor(dive_sub$Judge)
+#dive_sub$JCountry <- as.factor(dive_sub$JCountry)
+```
+
+```{r}
+dive_results <- dive_sub
+dive_results <- dive_results %>%
+  group_by(Diver, DiveNo, Round, Event) %>%
+  mutate(mean_score = mean(JScore),
+         discrepancy = JScore - mean_score)
+```
+
+```{r}
+dive_results <- dive_results %>%
+  mutate(
+    Match = as.factor(ifelse(JCountry == Country, "Match", "Mismatch"))
+  )
+```
+
+```{r}
+judge_results <- dive_results %>%
+  group_by(Judge, Match) %>%
+  summarise(mean_discrepancy = mean(discrepancy, na.rm = TRUE)) %>%
+  ungroup()
+
+
+judge_results <- judge_results %>%
+  pivot_wider(
+    names_from   = Match,
+    values_from  = mean_discrepancy
+  )
+
+judge_results
+```
+
+```{r}
+judges <- judge_results %>%
+  mutate(
+    Difference = Match - Mismatch
+  ) %>%
+  select(Judge, Difference, Match, Mismatch) %>%
+  arrange(desc(Difference))
+
+judges
+```
+
+
+```{r}
+dive_permutation <- dive_results
+
+head(dive_permutation)
+```
+
+```{r}
+num_trials <- 1000
+
+out <- vector("list", B)
+
+judges <- unique(dive_permutation$Judge)
+
+for (i in 1:1000) {
+  set.seed(i)
+  
+  permuted <- dive_permutation %>%
+  group_by(Judge) %>%
+  mutate(Match = sample(Match)) %>%
+  ungroup()
+  
+  diffs <- permuted %>%
+    group_by(Judge, Match) %>%
+    summarise(mean_disc = mean(discrepancy, na.rm = TRUE), .groups = "drop") %>%
+    pivot_wider(names_from = Match, values_from = mean_disc) %>%
+    mutate(Difference = Match - Mismatch) %>%
+    select(Judge, Difference)
+  
+  out[[i]] <- diffs  
+}
+
+perm_diffs <- bind_rows(out, .id = "Permutation")
+```
+
+```{r}
+perm_diffs$Judge <- as.factor(perm_diffs$Judge)
+judge_results$Judge <- as.factor(judge_results$Judge)
+judge_results <- judge_results %>%
+  mutate(True_Diff = Match - Mismatch)
+
+total_results <- perm_diffs %>%
+  left_join(judge_results, by = "Judge")
+total_results
+```
+
+
+Replication of results in slides.
+```{r, fig.height=6, fig.width=10, message=FALSE, warning=FALSE}
+mcfar_all   <- total_results %>%
+  filter(Judge == "McFARLAND Steve") %>%
+  pull(Difference)
+
+mcfar_truth <- total_results %>%
+  filter(Judge == "McFARLAND Steve") %>%
+  pull(True_Diff) %>%
+  unique()
+
+# turn it into a character for the legend
+truth_label <- paste0("Observed = ", round(mcfar_truth, 2))
+
+ggplot(data.frame(Difference = mcfar_all), aes(x = Difference)) +
+  # smoothed density, no trimming
+  geom_density(fill = "steelblue", alpha = 0.6, size = 1, trim = FALSE) +
+  
+  # actual vline (no legend) at the true value
+  geom_vline(xintercept = mcfar_truth, linetype = "dashed", color = "red", size = 1) +
+  
+  # invisible point used only to get a legend entry
+  geom_point(aes(x = mcfar_truth, y = 0, color = truth_label),
+             show.legend = TRUE, size = 0) +
+  
+  # manual scale so that only our dummy aesthetic shows up
+  scale_color_manual(
+    name   = NULL,
+    values = setNames("red", truth_label),
+    guide  = guide_legend(override.aes = list(linetype = "dashed", size = 1))
+  ) +
+  
+  # expand x‐axis so the density tail isn't cut off
+  scale_x_continuous(expand = expansion(mult = c(0, 0.02))) +
+  
+  labs(
+    x        = "Difference (Match − Mismatch)",
+    y        = "Density",
+    title    = "Null Distribution for McFARLAND Steve",
+    subtitle = "Density of permuted Differences; observed value in red"
+  ) +
+  theme_minimal() +
+  theme(
+    # put the legend inside the plot area, top‐right
+    legend.position.inside = c(0.8, 0.75),
+    legend.background      = element_blank(),
+    legend.key             = element_blank(),
+    plot.title             = element_text(hjust = 0.5, face = "bold")
+  )
+```
+
+Lists of judges grouped by: No Match, p-value<0.05, p-value>0.05
+```{r}
+judge_country <- dive_sub %>%
+  select(Judge, JCountry) %>%
+  distinct()
+
+evidence_country_bias_judges <- total_results %>%
+  group_by(Judge) %>%
+  summarise(Judge_pvalue = mean(Difference >= True_Diff, na.rm = TRUE)) %>%
+  filter(!is.na(Judge_pvalue) & Judge_pvalue < 0.05) %>%
+  left_join(judge_country, by = "Judge")
+
+no_strong_evidence_country_bias_judges <- total_results %>%
+  group_by(Judge) %>%
+  summarise(Judge_pvalue = mean(Difference >= True_Diff, na.rm = TRUE)) %>%
+  filter(!is.na(Judge_pvalue) & Judge_pvalue > 0.05) %>%
+  left_join(judge_country, by = "Judge")
+
+no_match_judges <- total_results %>%
+  group_by(Judge) %>%
+  summarise(Judge_pvalue = mean(Difference >= True_Diff, na.rm = TRUE)) %>%
+  filter(is.na(Judge_pvalue)) %>%
+  left_join(judge_country, by = "Judge")
+
+evidence_country_bias_judges
+no_strong_evidence_country_bias_judges
+no_match_judges
+```
+
+
+```{r}
+mlb_data <- read_csv("../data/07_tto.csv")
+head(mlb_data)
+unique(mlb_data$ORDER_CT)
+```
+```{r}
+model1 <- lm(EVENT_WOBA_19 ~ as.factor(ORDER_CT) + WOBA_FINAL_BAT_19 + WOBA_FINAL_PIT_19 + as.factor(HAND_MATCH) + as.factor(BAT_HOME_IND), data = mlb_data)
+
+summary(model1)
+```
+
+For this model, the intercept coeffcient is the reference level for TTO factor (first TTO), hand match (0), and home/away indicator (away, from batter perspective). The coefs for the other two levels represents the difference in the outcome variable (EVENT_WOBA_19) compared to the reference level. The coefficients for WOBA_FINAL_BAT_19 and WOBA_FINAL_PIT_19 represent the change in EVENT_WOBA_19 for a one-unit increase in those variables (batter quality and pitcher quality, respectively), holding all else constant. The HAND_MATCH and BAT_HOME_IND factors are included to control for potential confounding effects. All features sans HAND_MATCH=0.5 (switch hitter) are signficant at the $\alpha = 0.05$ level, indicating that if their true parameter values were $0$, we would expect to observe a t-statistic as extreme or more extreme than the one observed in less than 5 percent of samples. The null distribution for each parameter is Student-t with degrees of freedom equal to n - k - 1 , or 214386 - 7 - 1 = 214378. 
+
+
+```{r}
+model2 <- lm(EVENT_WOBA_19 ~ as.factor(ORDER_CT) + WOBA_FINAL_BAT_19 + WOBA_FINAL_PIT_19 + as.factor(HAND_MATCH) + as.factor(BAT_HOME_IND) + BATTER_SEQ_NUM, data = mlb_data)
+
+summary(model2)
+```
+
+For model 2, the intercept coeffcient is the reference level for TTO factor (first TTO), hand match (0), and home/away indicator (away, from batter perspective). The coefs for the other two levels represents the difference in the outcome variable (EVENT_WOBA_19) compared to the reference level. The coefficients for WOBA_FINAL_BAT_19 and WOBA_FINAL_PIT_19 represent the change in EVENT_WOBA_19 for a one-unit increase in those variables (batter quality and pitcher quality, respectively), holding all else constant. The HAND_MATCH and BAT_HOME_IND factors are included to control for potential confounding effects. All features sans HAND_MATCH=0.5 (switch hitter), TTO2, and TTO3 are signficant at the $\alpha = 0.05$ level, indicating that if their true parameter values were $0$, we would expect to observe a t-statistic as extreme or more extreme than the one observed in less than 5 percent of samples. In this model where we contral for batter sequence, both TTO2 and 3 are non-signficant in the model, suggesting that their signifance in the previous model was via them being correlated with batter sequence, hence when sequence was inlcuded we see that TTO carries less unique predictive value. The null distribution for each parameter is Student-t with degrees of freedom equal to n - k - 1 , or 214386 - 8 - 1 = 214377. 
