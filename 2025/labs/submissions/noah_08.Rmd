@@ -1,0 +1,234 @@
+---
+title: "Noah_08"
+author: '38880242'
+date: "2025-06-11"
+output: html_document
+---
+
+#############
+### SETUP ###
+#############
+
+# install.packages(c("ggplot2", "tidyverse"))
+library(ggplot2)
+library(tidyverse)
+library(broom)
+
+# set seed
+set.seed(8)
+
+#######################
+### NBA FREE THROWS ###
+#######################
+```{r}
+
+```
+
+# load data
+```{r}
+nba_players = read_delim("../data/08_nba-free-throws.csv", delim = ";") %>%
+  mutate(
+    FT  = `FT`  * G,    
+    FTA = `FTA` * G  )%>% 
+  group_by(Player) %>%
+  summarize(
+    G_total = sum(G,   na.rm = TRUE),
+    FT      = sum(FT,  na.rm = TRUE),
+    FTA     = sum(FTA, na.rm = TRUE),
+  
+    .groups = "drop"
+  ) %>%
+  filter(FTA > 25) %>%
+  mutate(
+    FT_pct     = FT / FTA,
+    FT_perGame = FT / G_total,
+    FTA_perGame= FTA / G_total
+  )
+
+```
+
+```{r}
+z <- qnorm(0.975)
+nbadata_ci <- nba_players %>%
+  mutate(
+    se_wald = sqrt(FT_pct * (1 - FT_pct) / FTA),
+    wald_lo = FT_pct - z * se_wald,
+    wald_hi = FT_pct + z * se_wald,
+    
+    FT_adj = FT + 2,      
+    n_adj  = FTA + 4,    
+    p_ac   = FT_adj / n_adj,
+    se_ac  = sqrt(p_ac * (1 - p_ac) / n_adj),
+    ac_lo  = p_ac - z * se_ac,
+    ac_hi  = p_ac + z * se_ac
+  )
+
+sample_df <- nbadata_ci %>%
+  slice_sample(n = 20)
+
+ggplot(sample_df, aes(x = FT_pct, y = reorder(Player, FT_pct))) +
+  geom_point(size = 2) +
+  geom_errorbarh(aes(xmin = wald_lo, xmax = wald_hi),
+                 height = 0.2, color = "blue") +
+  geom_errorbarh(aes(xmin = ac_lo, xmax = ac_hi),
+                 height = 0.2, color = "red") +
+  labs(
+    x     = "Season Free-Throw %",
+    y     = NULL,
+    title = " Wald (blue) and Agresti–Coull (red)"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# 1) Your grid of p’s and n’s
+x        <- seq(0, 1, length.out = 1000)
+n_values <- c(10, 50, 100, 250, 500, 1000)
+
+# 2) Build the (p, n) combinations
+sim_df <- expand_grid(
+  p = x,
+  n = n_values
+)
+
+# 3) Pre-allocate an empty list-column
+sim_df$throws <- vector("list", nrow(sim_df))
+
+# 4) Fill it with rbinom() draws in a for-loop
+for (i in seq_len(nrow(sim_df))) {
+  # for row i, simulate n[i] Bernoulli(p[i]) trials
+  sim_df$throws[[i]] <- rbinom(
+    n    = sim_df$n[i],   # how many throws
+    size = 1,             # Bernoulli each
+    prob = sim_df$p[i]    # with probability p[i]
+  )
+}
+
+sim_df %>%
+  slice_sample(n = 6) %>%
+  mutate(throws = lapply(throws, head, 10))  
+
+```
+
+```{r}
+sim_ci_df <- sim_df %>%
+  rowwise() %>% 
+  mutate(
+    X       = sum(throws),
+    phat    = X / n,
+    z       = qnorm(0.975),
+    
+    se_wald = sqrt(phat * (1 - phat) / n),
+    wald_lo = phat - z * se_wald,
+    wald_hi = phat + z * se_wald,
+    
+    p_ac    = (X + 2) / (n + 4),
+    se_ac   = sqrt(p_ac * (1 - p_ac) / (n + 4)),
+    ac_lo   = p_ac - z * se_ac,
+    ac_hi   = p_ac + z * se_ac
+  ) %>%
+  ungroup() %>%
+  select(p, n, X, phat, 
+         wald_lo, wald_hi, 
+         ac_lo, ac_hi)
+
+sim_ci_df %>% 
+  slice_sample(n = 10)
+
+```
+```{r}
+
+M        <- 100
+p_grid   <- seq(0, 1, length.out = 1000)
+n_values <- c(10, 50, 100, 250, 500, 1000)
+z        <- qnorm(0.975)
+
+sim_results <- expand_grid(
+  rep = 1:M,     
+  p   = p_grid,
+  n   = n_values
+) %>%
+  rowwise() %>% 
+  mutate(
+    X       = rbinom(1, size = n, prob = p),
+    phat    = X / n,
+    
+    se_wald = sqrt(phat * (1 - phat) / n),
+    wald_lo = phat - z * se_wald,
+    wald_hi = phat + z * se_wald,
+    
+    p_ac    = (X + 2) / (n + 4),
+    se_ac   = sqrt(p_ac * (1 - p_ac) / (n + 4)),
+    ac_lo   = p_ac - z * se_ac,
+    ac_hi   = p_ac + z * se_ac
+  ) %>%
+  ungroup() %>%
+  select(rep, p, n, X, phat,
+         wald_lo, wald_hi,
+         ac_lo,   ac_hi)
+
+sim_results %>% slice_sample(n = 12)
+
+```
+```{r}
+coverage_df <- sim_results %>%
+  group_by(p, n) %>%
+  summarise(
+    wald_cover = mean(wald_lo <= p & wald_hi >= p),
+    ac_cover   = mean(ac_lo   <= p & ac_hi   >= p),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(
+    cols      = c(wald_cover, ac_cover),
+    names_to  = "method",
+    values_to = "coverage"
+  )
+
+ggplot(coverage_df, aes(x = p, y = coverage, color = method)) +
+  geom_line(size = 0.8) +
+  geom_hline(yintercept = 0.95, linetype = "dashed", color = "gray") +
+  facet_wrap(~ n, ncol = 2) +
+  scale_color_manual(
+    values = c("wald_cover" = "blue", "ac_cover" = "red"),
+    labels = c("Wald", "Agresti–Coull")
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+coverage_df <- sim_results %>%
+  group_by(p, n) %>%
+  summarize(
+    wald_cover = mean(wald_lo <= p & wald_hi >= p),
+    ac_cover   = mean(ac_lo   <= p & ac_hi   >= p),
+    .groups = "drop"
+  )
+
+coverage_long <- coverage_df %>%
+  pivot_longer(
+    cols      = c(wald_cover, ac_cover),
+    names_to  = "method",
+    values_to = "coverage"
+  ) %>%
+  mutate(
+    method = recode(method,
+                    wald_cover = "Wald",
+                    ac_cover   = "Agresti–Coull")
+  )
+
+ggplot(coverage_long, aes(x = p, y = coverage, color = method)) +
+  geom_line(size = 0.8) +
+  geom_hline(yintercept = 0.95, linetype = "dashed", color = "grey") +
+  facet_wrap(~ n, ncol = 2) +
+  scale_color_manual(values = c(Wald = "blue", `Agresti–Coull` = "red")) +
+  labs(
+    title = "Empirical 95% CI Coverage vs True p\nby Sample Size n and CI Method",
+    x     = "True Free-Throw Probability (p)",
+    y     = "Empirical Coverage",
+    color = "Method"
+  ) +
+  theme_minimal(base_size = 14)
+
+```
+
