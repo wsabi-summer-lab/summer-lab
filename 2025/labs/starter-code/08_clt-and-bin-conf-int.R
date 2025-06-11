@@ -5,7 +5,6 @@
 # install.packages(c("ggplot2", "tidyverse"))
 library(ggplot2)
 library(tidyverse)
-library(broom)
 
 # set seed
 set.seed(8)
