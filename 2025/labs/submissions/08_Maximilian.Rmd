@@ -1,0 +1,181 @@
+---
+title: "08_Maximilian"
+author: "Maximilian J. Gebauer"
+date: "2025-06-11"
+output: html_document
+---
+
+```{r Setup, include=FALSE, results='hide', warning=FALSE}
+knitr::opts_chunk$set(echo = T, fig.width=8, fig.height=4)
+options(scipen = 0, digits = 3)  # controls base R output
+
+# Package setup
+if(!require("pacman")) install.packages("pacman")
+
+pacman::p_load(tidyverse, dplyr, ggthemes, data.table, lubridate, glmnet,
+               GGally, RColorBrewer, ggsci, plotROC, usmap,
+               plotly, ggpubr, vistime, coefplot, skimr, car, ggrepel, slider, lubridate,
+               tidymodels,ranger,vip,ggplot2, tune,dials,pdp, purrr, stringr, lmtest,
+               sandwich, nnet)
+```
+
+```{r}
+set.seed(8)
+```
+
+```{r}
+nba_players <- read.csv("../data/08_nba-free-throws.csv", sep = ";")
+```
+
+```{r}
+head(nba_players)
+```
+
+```{r}
+set.seed(8)
+agg_data <- nba_players %>%
+  group_by(Player) %>%
+  mutate(
+    Total_FTA = round(sum(FTA * G), digits=0),
+    Total_FTM = round(sum(FT * G), digits=0),
+    FT_percent = Total_FTM / Total_FTA * 100
+  ) %>%
+  filter(Total_FTA > 24) %>%
+  select(Player, Total_FTA, Total_FTM, FT_percent) %>%
+  unique() %>%
+  arrange(Total_FTA) %>%
+  ungroup()
+
+agg_data$Player <- as.factor(agg_data$Player)
+
+agg_data_sub <- agg_data %>% 
+  slice_sample(n=30)
+
+
+```
+
+```{r, fig.width=10, fig.height=6, warning=FALSE, message=FALSE}
+wald_ci <- function(x, n) {
+  p <- x / n
+  se <- sqrt(p * (1 - p) / n)
+  lower <- p - 1.96 * se
+  upper <- p + 1.96 * se
+  c(lower, upper)
+}
+
+# Agresti-Coull 95% CI function
+ac_ci <- function(x, n) {
+  z <- 1.96
+  n_adj <- n + 4
+  p_adj <- (x + 2) / n_adj
+  se_adj <- sqrt(p_adj * (1 - p_adj) / n_adj)
+  lower <- (x/n) - z * se_adj
+  upper <- (x/n) + z * se_adj
+  c(lower, upper)
+}
+
+agg_data_with_ci <- agg_data_sub %>%
+  rowwise() %>%
+  mutate(
+    FT = Total_FTM / Total_FTA,
+    wald_low = wald_ci(Total_FTM, Total_FTA)[1] * 100,
+    wald_high = wald_ci(Total_FTM, Total_FTA)[2] * 100,
+    ac_low = ac_ci(Total_FTM, Total_FTA)[1] * 100,
+    ac_high = ac_ci(Total_FTM, Total_FTA)[2] * 100
+  ) %>%
+  ungroup()
+
+ggplot(agg_data_with_ci, aes(x = reorder(Player, FT_percent), y = FT_percent)) +
+  geom_point(color = "black", size = 2) +
+  
+  # Slight left shift for Wald CI
+  geom_errorbar(
+    aes(ymin = wald_low, ymax = wald_high),
+    width = 0.2, color = "red", alpha = 0.6,
+    position = position_nudge(x = -0.2)
+  ) +
+
+  # Slight right shift for Agresti-Coull CI
+  geom_errorbar(
+    aes(ymin = ac_low, ymax = ac_high),
+    width = 0.2, color = "blue", alpha = 0.6,
+    position = position_nudge(x = 0.2)
+  ) +
+
+  coord_flip() +
+  labs(
+    title = "Free Throw Percentage with 95% Wald and Agresti-Coull Confidence Intervals",
+    x = "Player",
+    y = "FT%"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+p_vec    <- seq(0, 1, length.out = 1000)
+p_vec    <- p_vec[p_vec != 0 & p_vec != 1]
+n_vec    <- c(10, 50, 100, 250, 500, 1000)
+num_sims <- 100
+
+coverage_fn <- function(p, n, num_sims) {
+  x <- rbinom(num_sims, size = n, prob = p)
+  phat <- x / n
+  se_w <- sqrt(phat * (1 - phat) / n)
+  wald_l <- phat - qnorm(0.975) * se_w
+  wald_u <- phat + qnorm(0.975) * se_w
+  cov_w <- mean(wald_l <= p & wald_u >= p)
+  
+  # Agresti–Coull ("add‐2") CI
+  n_tilde <- n + 4
+  phat_tilde <- (x + 2) / n_tilde
+  se_a <- sqrt(phat_tilde * (1 - phat_tilde) / n_tilde)
+  ag_l <- x - qnorm(0.975) * se_a
+  ag_u <- x + qnorm(0.975) * se_a
+  cov_a <- mean(ag_l <= p & ag_u >= p)
+  
+  c(coverage_wald = cov_w, coverage_ag = cov_a)
+}
+
+# build results data.frame
+results <- expand.grid(p = p_vec, n = n_vec) %>%
+  rowwise() %>%
+  mutate(
+    cov = list(coverage_fn(p, n, num_sims))
+  ) %>%
+  unnest_wider(cov) %>%
+  ungroup()
+
+plot_data <- results %>%
+  pivot_longer(
+    cols      = c(coverage_wald, coverage_ag),
+    names_to  = "method",
+    values_to = "coverage"
+  ) %>%
+  # explicitly convert the raw names to exactly the labels you want
+  mutate(
+    method = case_when(
+      method == "coverage_ag" ~ "Wald CI",
+      method == "coverage_wald"   ~ "Agresti–Coull CI"
+    ),
+    n = factor(n)
+  )
+
+# coverage vs p, colored by method, facetted by n
+ggplot(plot_data, aes(x = p, y = coverage, color = as.factor(method))) +
+  geom_line(alpha = 0.8) +
+  facet_wrap(~ n, ncol = 3) +
+  labs(
+    title = "Empirical Coverage of 95% Wald vs Agresti–Coull CIs",
+    x = expression(p),
+    y = "Coverage Probability",
+    color = "CI Method"
+  ) +
+  geom_hline(yintercept = 0.95, linetype = "dashed") +
+  theme_minimal()
+```
+
+
+
+
+
+
