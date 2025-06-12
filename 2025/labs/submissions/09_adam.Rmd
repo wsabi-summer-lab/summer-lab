@@ -1,0 +1,211 @@
+---
+title: "Lab 9"
+output:
+  pdf_document: default
+  html_document: default
+date: "2025-06-12"
+---
+
+```{r skittles, message = FALSE, echo = FALSE}
+library(ggplot2)
+library(tidyverse)
+
+r = rep("R", 20)
+n = rep("N", 93)
+v = c(r, n)
+
+p = 20/113
+q = 22/117
+n = 113
+
+
+w_low = p - 1.96 * sqrt((p * (1 - p)) / n)
+w_high = p + 1.96 * sqrt((p * (1 - p)) / n)
+ag_low = p - 1.96 * sqrt((q * (1 - q)) / (n + 4))
+ag_high = p + 1.96 * sqrt((q * (1 - q)) / (n + 4))
+
+w_low
+w_high
+
+ag_low
+ag_high
+
+boots = c()
+
+for (i in 1:1000000) {
+  boot = sample(v, 113, replace = TRUE)
+  boot_p = mean(boot == "R")
+  boots[i] = boot_p
+}
+
+ggplot(data.frame(boots), aes(x = boots)) +
+  geom_histogram(binwidth = 0.01, fill = "blue", alpha = 0.5) +
+  labs(title = "Bootstrapped Proportions of R", x = "Proportion of R", y = "Frequency") +
+  theme_minimal()
+
+quantile(boots, c(0.025, 0.975))
+
+```
+
+wald: (0.10662, 0.24736)
+ag: (0.10619, 0.24779)
+bootstrap: (0.10619, 0.24779)
+
+```{r nba, message = FALSE, echo = FALSE}
+#############
+### SETUP ###
+#############
+
+# install.packages(c("ggplot2", "tidyverse"))
+library(ggplot2)
+library(tidyverse)
+
+# set seed
+set.seed(8)
+
+#######################
+### NBA FREE THROWS ###
+#######################
+
+# load data
+nba_players = read_delim("../data/09_nba-free-throws.csv", delim = ";")
+data = nba_players %>%
+  group_by(Player) %>%
+  summarise(
+    FT = sum(FT*G, na.rm = TRUE),
+    FTA = sum(FTA*G, na.rm = TRUE),
+    G = sum(G, na.rm = TRUE)
+  ) %>%
+  filter(FTA >= 25) %>% 
+  mutate(FT. = FT/FTA,
+         FT.ag = (FT+2)/(FTA+4)) %>% 
+  arrange(desc(FT.)) %>% 
+  mutate(
+    w.low = FT.- 1.96*sqrt((FT.*(1-FT.))/FTA),
+    w.high = FT. + 1.96*sqrt((FT.*(1-FT.))/FTA),
+    ag.low = FT.ag - 1.96*sqrt((FT.ag*(1-FT.ag))/(FTA+4)),
+    ag.high = FT.ag + 1.96*sqrt((FT.ag*(1-FT.ag))/(FTA+4))
+  ) %>% 
+  slice_sample(n=50)
+
+
+boots = c()
+for (i in 1:nrow(data)) {
+  player <- data$Player[i]
+  ft <- round(data$FT[i])     # Free throws made
+  fta <- round(data$FTA[i])   # Free throws attempted
+  
+  makes <- rep(1, ft)
+  misses <- rep(0, fta - ft)
+  shots <- c(makes, misses)
+  
+  boot_p <- numeric(1000)
+  for (j in 1:1000) {
+    boot <- sample(shots, fta, replace = TRUE)
+    boot_p[j] <- mean(boot)
+  }
+  
+  boots[[player]] <- boot_p
+}
+boots_df <- data.frame(
+  Player = rep(names(boots), each = length(boots[[1]])),
+  Proportion = unlist(boots)
+) %>% 
+  group_by(Player) %>% 
+  mutate(
+    Lower = quantile(Proportion, 0.025),
+    Upper = quantile(Proportion, 0.975)
+  ) %>% 
+  summarise(
+    Mean = mean(Proportion),
+    Lower = mean(Lower),
+    Upper = mean(Upper)
+  ) 
+
+joined = left_join(data, boots_df, by = "Player")
+ggplot(joined, aes(x = FT., y = fct_reorder(Player, FT.))) +
+  geom_point() +
+  labs(
+    title = "NBA Free Throw Percentage",
+    x = "Free Throw Percentage",
+    y = "Player"
+  ) +
+  theme_minimal() +
+  geom_errorbarh(aes(xmin = w.low, xmax = w.high), height = 0.2, color = "blue") +
+  geom_errorbarh(aes(xmin = ag.low, xmax = ag.high), height = 0.2, color = "red") +
+  geom_errorbarh(aes(xmin = Lower, xmax = Upper), height = 0.2, color = "green") 
+
+
+joined %>% 
+  summarise(
+    w = mean(w.high-w.low),
+    ag = mean(ag.high-ag.low),
+    boot = mean(Upper-Lower))
+
+
+```
+
+W avg width:0.1766637	ag avg width:0.1756379	boot avg width:0.1747058	
+
+```{r pressure, message = FALSE, echo = FALSE}
+library(ggplot2)
+library(tidyverse)
+
+P = ppoints(100)
+N = c(10, 50, 100, 250, 500, 1000)
+
+results = tibble()
+
+n_boot = 100
+
+  for (p in P) {
+    for (n in N) {
+      binom = rbinom(n = 1, size = n, prob = p)
+      n = n
+      p = p
+      obs_p = binom / n
+      binom_expanded = rep(c(1, 0), times = c(binom, n - binom))
+      
+      boot_ps = numeric(n_boot)
+      
+      for (i in 1:n_boot) {
+        boot_sample = sample(binom_expanded, replace = TRUE)
+        boot_p = mean(boot_sample)
+        
+        boot_ps[i] = boot_p
+      }
+      
+      boot_ci_lower = quantile(boot_ps, 0.025)
+      boot_ci_upper = quantile(boot_ps, 0.975)
+      
+      ind_result = tibble(n = n, p = p, obs_p, boot_ci_lower, boot_ci_upper)
+      
+      results = bind_rows(results, ind_result)
+      }
+    }
+
+results %>% slice_sample(n = 10)
+
+
+cov = results %>% 
+  group_by(n, p) %>% 
+  summarise(
+    cov = mean((boot_ci_lower <= p) & (p <= boot_ci_upper))
+  )
+
+ggplot(cov, aes(x = p, y = cov)) +
+  geom_point() +
+  labs(
+    title = "Coverage Probability of Wald and Agresti-Coull Intervals",
+    x = "Sample Size (n)",
+    y = "Coverage Probability",
+    color = "Interval Type"
+  ) +
+  geom_hline(yintercept = 0.95, linetype = "dashed", color = "black") +
+  theme_minimal() +
+  facet_wrap(~n, scales = "free_y") 
+
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
