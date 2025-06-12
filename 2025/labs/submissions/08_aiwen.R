@@ -40,8 +40,8 @@ at_least_25 <- at_least_25 %>%
   mutate(FT_percentage_hat = ((ft_sum + 2)/(TFA + 4)))
 
 agresti_coull_ci <- at_least_25 %>%
-  mutate(lower_agresti = FT_percentage_hat - 1.96 * sqrt((FT_percentage_hat * (1 - FT_percentage_hat)) / (TFA + 4)),
-         upper_agresti = FT_percentage_hat + 1.96 * sqrt((FT_percentage_hat * (1 - FT_percentage_hat)) / (TFA + 4)))
+  mutate(lower_agresti = FT_percentage - 1.96 * sqrt((FT_percentage_hat * (1 - FT_percentage_hat)) / (TFA + 4)),
+         upper_agresti = FT_percentage + 1.96 * sqrt((FT_percentage_hat * (1 - FT_percentage_hat)) / (TFA + 4)))
 
 # Combine the data for plotting
 combined_data <- at_least_25 %>%
@@ -120,8 +120,8 @@ results <- results %>%
     lower_wald = prop_success - 1.96 * sqrt((prop_success * (1 - prop_success)) / n),
     upper_wald = prop_success + 1.96 * sqrt((prop_success * (1 - prop_success)) / n),
     prop_success_hat = (prop_success * n + 2) / (n + 4),
-    lower_agresti = prop_success_hat - 1.96 * sqrt((prop_success_hat * (1 - prop_success_hat)) / (n + 4)),
-    upper_agresti = prop_success_hat + 1.96 * sqrt((prop_success_hat * (1 - prop_success_hat)) / (n + 4))
+    lower_agresti = prop_success - 1.96 * sqrt((prop_success_hat * (1 - prop_success_hat)) / (n + 4)),
+    upper_agresti = prop_success + 1.96 * sqrt((prop_success_hat * (1 - prop_success_hat)) / (n + 4))
   )
 
 # step 5: Plot the results
