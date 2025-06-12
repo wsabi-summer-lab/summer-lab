@@ -1,0 +1,254 @@
+6.1.4 Task 1 
+```{r}
+#1 - model expected points as linear function of yard line
+library(tidyverse)
+library(ggplot2)
+library(nnet)
+
+expected_points = read.csv('../data/06_expected-points.csv')
+
+head(expected_points)
+
+#generate model
+lin_model = multinom(factor(pts_next_score) ~ yardline_100, data = expected_points)
+#get predicted
+probs <- predict(lin_model, type = 'probs')
+colnames(probs)
+point_values <- c(
+  "-7" = -7,
+  "-3" = -3,
+  "-2" = -2,
+   "0" =  0,
+   "2" =  2,
+   "3" =  3,
+   "7" =  7
+)
+
+# Calculate expected points from probabilities × point values
+expected_points$predicted_points <- as.numeric(probs %*% point_values[colnames(probs)])
+
+#plot real points vs yard line 
+real_expected_points <- expected_points %>%
+  group_by(yardline_100) %>%
+  summarise(
+    pts_next_score = mean(pts_next_score),
+    predicted_points = mean(predicted_points)
+  ) %>%
+  arrange(yardline_100)
+  
+ggplot(real_expected_points, aes(x = yardline_100)) +
+  geom_point(aes(y = pts_next_score), alpha = 0.4) +
+  geom_line(aes(y = predicted_points), color = "steelblue", size = 1.2) +
+  labs(
+    title = "Expected Points vs Yard Line (Linear Regression)",
+    x = "Yard Line (100 = Opponent's End Zone)",
+    y = "Expected Points"
+  ) +
+  theme_minimal()
+#Data is not continuous, difficult to model with smooth regression line
+```
+```{r}
+#2 - spline for expected points
+library(splines)
+spline_model <- multinom(factor(pts_next_score) ~ bs(yardline_100, df = 5), data = expected_points)
+
+spline_probs <- predict(spline_model, type = 'probs')
+expected_points$spline_predicted_points <- as.numeric(spline_probs %*% point_values[colnames(spline_probs)])
+
+real_expected_points_spline <- expected_points %>%
+  group_by(yardline_100) %>%
+  summarise(
+    pts_next_score = mean(pts_next_score),
+    predicted_spline = mean(spline_predicted_points)) %>%
+  arrange(yardline_100)
+
+ggplot(real_expected_points_spline, aes(x = yardline_100)) +
+  geom_point(aes(y = pts_next_score), alpha = 0.4) +
+  geom_line(aes(y = predicted_spline), color = "darkred", size = 1.2) +
+  labs(
+    title = "Spline-Based Estimate of Expected Points vs Yard Line",
+    x = "Yard Line (100 = Opponent's End Zone)",
+    y = "Expected Points"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+#3 - function of yard line and down
+model_3 = multinom(factor(pts_next_score) ~ yardline_100 + down, data = expected_points)
+probs_3 <- predict(model_3, type = 'probs')
+expected_points$predicted_points_3 <- as.numeric(probs_3 %*% point_values[colnames(probs_3)])
+
+expected_points_3 <- expected_points %>%
+  group_by(yardline_100, down) %>%
+  summarise(
+    pts_next_score = mean(pts_next_score),
+    predicted_points_3 = mean(predicted_points_3)
+  ) %>%
+  arrange(yardline_100, down)
+
+ggplot(expected_points_3, aes(x = yardline_100)) +
+  geom_point(aes(y = pts_next_score, color = factor(down)), alpha = 0.5) +
+  geom_point(aes(y = predicted_points_3), color = "deeppink", size = 1.2, alpha = .5) +
+  labs(
+    title = "Estimate of Expected Points vs Yard Line and Down",
+    x = "Yard Line (100 = Opponent's End Zone)",
+    y = "Expected Points"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+#4 - function of yard line, down, and yards to go 
+model_4 = multinom(factor(pts_next_score) ~ bs(yardline_100, df = 5) + factor(down) + bs(ydstogo, df = 5), data = expected_points)
+probs_4 = predict(model_4, type = 'probs')
+expected_points$predicted_points_4 <- as.numeric(probs_4 %*% point_values[colnames(probs_4)])
+expected_points_4 <- expected_points %>%
+  group_by(yardline_100, down, ydstogo) %>%
+  summarise(
+    pts_next_score = mean(pts_next_score),
+    predicted_points_4 = mean(predicted_points_4)
+  ) %>%
+  arrange(yardline_100, down, ydstogo)
+
+ggplot(expected_points_4, aes(x = yardline_100)) +
+  geom_point(aes(y = pts_next_score, color = factor(ydstogo)), alpha = 0.5) +
+  geom_point(aes(y = predicted_points_4), color = "darkslateblue", size = 1.2, alpha = 0.5) +
+  facet_wrap(~ down) +
+  labs(
+    title = "Expected Points vs Yard Line by Down and Yards to Go",
+    x = "Yard Line (100 = Opponent's End Zone)",
+    y = "Expected Points",
+    color = "Down"
+  ) +
+  theme_minimal()
+
+```
+```{r}
+#5 - function of yard line, down, yards to go, and time in the half
+
+#linear term
+model_5 = multinom(factor(pts_next_score) ~ bs(yardline_100, df = 5) + factor(down) + bs(ydstogo, df = 5) + half_seconds_remaining, data = expected_points)
+probs_5 = predict(model_5, type = 'probs')
+expected_points$predicted_points_5 <- as.numeric(probs_5 %*% point_values[colnames(probs_5)])
+  
+```
+```{r}
+#plot for 5
+
+expected_points_5 <- expected_points %>%
+  filter(down == 1, ydstogo == 10) %>%
+  mutate(time_bin = cut(half_seconds_remaining, breaks = 4))
+
+# Average EP by yardline and time bin
+avg_ep_by_yardline <- expected_points_5 %>%
+  group_by(yardline_100) %>%
+  summarise(avg_pred_ep = mean(predicted_points_5, na.rm = TRUE)) %>%
+  arrange(yardline_100)
+
+ggplot() +
+  geom_point(data = expected_points_5, aes(x = yardline_100, y = predicted_points_5, color = half_seconds_remaining), alpha = 0.4) +
+  geom_line(data = avg_ep_by_yardline, aes(x = yardline_100, y = avg_pred_ep), color = "darkturquoise", size = 1.2) +
+  scale_color_viridis_c(option = "plasma") +
+  labs(
+    title = "Expected Points per Play and Model Trend (1st & 10)",
+    x = "Yard Line (100 = Opponent's End Zone)",
+    y = "Expected Points",
+    color = "Seconds Remaining"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+model_6 = multinom(factor(pts_next_score) ~ bs(yardline_100, df = 5) + factor(down) + bs(ydstogo, df = 5) + bs(half_seconds_remaining, df=5), data = expected_points)
+probs_6 = predict(model_6, type = 'probs')
+expected_points$predicted_points_6 <- as.numeric(probs_5 %*% point_values[colnames(probs_6)])
+```
+
+```{r}
+expected_points_6 <- expected_points %>%
+  filter(down == 1, ydstogo == 10) %>%
+  mutate(time_bin = cut(half_seconds_remaining, breaks = 4))
+
+# Average EP by yardline and time bin
+avg_ep_by_yardline_6 <- expected_points_6 %>%
+  group_by(yardline_100) %>%
+  summarise(avg_pred_ep = mean(predicted_points_6, na.rm = TRUE)) %>%
+  arrange(yardline_100)
+
+ggplot() +
+  geom_point(data = expected_points_6, aes(x = yardline_100, y = predicted_points_6, color = half_seconds_remaining), alpha = 0.4) +
+  geom_line(data = avg_ep_by_yardline_6, aes(x = yardline_100, y = avg_pred_ep), color = "darkturquoise", size = 1.2) +
+  scale_color_viridis_c(option = "plasma") +
+  labs(
+    title = "Expected Points per Play and Model Trend (1st & 10)",
+    x = "Yard Line (100 = Opponent's End Zone)",
+    y = "Expected Points",
+    color = "Seconds Remaining"
+  ) +
+  theme_minimal()
+```
+Task 2: Adjust for Team Quality
+
+```{r}
+
+#1 - adjust for pre-game point spread 
+model_M_prime <- multinom(factor(pts_next_score) ~ 
+                            bs(yardline_100, df = 5) + 
+                            factor(down) + 
+                            bs(ydstogo, df = 5) + 
+                            bs(half_seconds_remaining, df = 5) + 
+                            posteam_spread,
+                          data = expected_points)
+                           
+expected_points_zero_spread <- expected_points
+expected_points_zero_spread$posteam_spread <- 0
+
+probs_M_prime <- predict(model_M_prime, newdata = expected_points_zero_spread, type = 'probs')
+expected_points$predicted_points_M_prime <- as.numeric(probs_M_prime %*% point_values[colnames(probs_M_prime)])
+
+# 3. Filter to 1st & 10 plays
+expected_points_compare <- expected_points %>%
+  filter(down == 1, ydstogo == 10) %>%
+  mutate(time_bin = cut(half_seconds_remaining, breaks = 4))
+```
+```{r}
+#2 - plot to compare models
+avg_ep_compare <- expected_points_compare %>%
+  group_by(yardline_100) %>%
+  summarise(
+    avg_ep_M = mean(predicted_points_6, na.rm = TRUE),
+    avg_ep_M_prime = mean(predicted_points_M_prime, na.rm = TRUE)
+  ) %>%
+  arrange(yardline_100)
+
+ggplot() +
+  # Raw per-play EP from Model M
+  geom_point(data = expected_points_compare,
+             aes(x = yardline_100, y = predicted_points_6, color = half_seconds_remaining),
+             alpha = 0.4) +
+  
+  # Line: average EP from Model M (with spread)
+  geom_line(data = avg_ep_compare,
+            aes(x = yardline_100, y = avg_ep_M),
+            color = "darkturquoise", size = 1.2) +
+  
+  # Line: average EP from Model M′ (spread = 0)
+  geom_line(data = avg_ep_compare,
+            aes(x = yardline_100, y = avg_ep_M_prime),
+            color = "chartreuse", size = 1.2) +
+
+  scale_color_viridis_c(option = "plasma") +
+  labs(
+    title = "Expected Points per Play: Model M vs Model M′ (1st & 10)",
+    subtitle = "Turquoise = Model M, Chartreuse = Model M′ (spread = 0)",
+    x = "Yard Line (100 = Opponent's End Zone)",
+    y = "Expected Points",
+    color = "Seconds Remaining"
+  ) +
+  theme_minimal()
+
+```
+

@@ -1,0 +1,122 @@
+---
+title: "Lab 9 - Bootstrapping"
+output: html_notebook
+---
+
+```{r}
+
+library(tidyverse)
+library(ggplot2)
+
+red = 21
+n = 21 + 26 + 21 + 24 + 22 
+
+red_vec <- c(rep(TRUE, red), rep(FALSE, n - red))
+
+# Shuffle the vector
+red_vec <- sample(red_vec)
+
+# Create data frame
+mnms <- data.frame(entry = 1:n, red = red_vec)
+
+head(mnms)
+
+```
+```{r}
+#construct confidence intervals
+red_percent = red/n
+
+wald_se = sqrt((red_percent * (1 - red_percent)) / n)
+wald_lower = red_percent - 1.96 * wald_se
+wald_upper = red_percent + 1.96 * wald_se
+
+wald_df <- data.frame(
+  proportion = red_percent,
+  lower = wald_lower,
+  upper = wald_upper
+  )
+
+n_tilde = n + 4
+p_tilde = (red + 2) / n_tilde
+ac_se = sqrt((p_tilde * (1 - p_tilde)) / n_tilde)
+ac_lower = p_tilde - 1.96 * ac_se
+ac_upper = p_tilde + 1.96 * ac_se
+
+ac_df <- data.frame(
+  proportion = red_percent,
+  lower = ac_lower,
+  upper = ac_upper
+  )
+
+ggplot(wald_df, aes(x = 1, y = proportion)) +
+  geom_point(color = "darksalmon", size = 3) +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.1) +
+  geom_hline(yintercept = red_percent, linetype = "dashed", color = "red") +
+  ylim(0, 1) +
+  labs(
+    title = "Wald 95% Confidence Interval for Proportion Red",
+    y = "Proportion Red",
+    x = NULL
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+
+```
+```{r}
+#bootstrap 
+
+set.seed(9)
+permutations = 100000 
+
+bootstrap_p <- numeric(permutations)
+
+for (i in 1:permutations) {
+  bootstrap_sample <- sample(mnms$red, replace = TRUE)
+  p <- sum(bootstrap_sample) / length(bootstrap_sample)
+  bootstrap_p[i] <- p
+}
+
+# Save into a data frame
+bootstrap_results <- data.frame(p = bootstrap_p)
+
+# Preview
+head(bootstrap_results)
+
+ggplot(bootstrap_results, aes(x = p)) +
+  geom_histogram(binwidth = 0.01, fill = "#FF6B6B", color = "white", boundary = 0) +
+  labs(
+    title = "Bootstrap Distribution of Proportion Red",
+    x = "Proportion Red (p)",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+ci <- quantile(bootstrap_results$p, probs = c(0.025, 0.975))
+
+ci_df <- tibble::tibble(
+  method = c("Wald", "Agresti-Coull", "Bootstrap"),
+  lower = c(wald_lower, ac_lower, ci[1]),
+  upper = c(wald_upper, ac_upper, ci[2]),
+  estimate = red_percent
+)
+
+ggplot(ci_df, aes(x = method, y = estimate)) +
+  geom_point(color = "red", size = 3) +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.05, color = "black") +
+  ylim(0, 0.4) +
+  labs(
+    title = "95% Confidence Intervals for Proportion Red",
+    y = "Proportion",
+    x = "Method"
+  ) +
+  theme_minimal()
+
+```
+
+We see that the confidence intervals are relatively similar across the methods, with wald and bootstrap being almost identical. The agresti-coull interval looks to be slightly larger but it's difficult to tell due to the additional positive transformation of the interval.
+
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+

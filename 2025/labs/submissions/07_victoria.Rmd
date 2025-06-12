@@ -1,0 +1,92 @@
+
+7.1.2 Task
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+#1 - permutation test for diving data 
+diving = read.csv("../data/07_diving.csv")
+head(diving)
+
+judges = unique(diving$Judge)
+results <- data.frame(Judge = character(), p_value = numeric(), stringsAsFactors = FALSE)
+
+n_permutations = 1000
+
+diving_means <- diving %>%
+    group_by(Diver, DiveNo, Round, Event) %>%
+    summarise(mean_score = mean(JScore, na.rm = TRUE), .groups = 'drop')
+
+head(diving_means)
+
+#loop through each judge
+for (judge in judges){
+  diving_judges <- diving %>%
+    filter(Judge == judge) %>%
+    select(JScore, JCountry, Country, Judge, Diver, DiveNo, Round, Event) %>% 
+    mutate(match = (Country == JCountry))
+  
+  
+  judging_with_disc <- diving_judges %>%
+    left_join(diving_means, by = c("Diver", "DiveNo", "Round", "Event")) %>%
+    mutate(discrepancy = JScore - mean_score)
+  
+  observed_diff = mean(judging_with_disc$discrepancy[judging_with_disc$match], na.rm = TRUE) -
+       mean(judging_with_disc$discrepancy[!judging_with_disc$match], na.rm = TRUE)
+  print(observed_diff)
+  
+  perm_diffs <- numeric(n_permutations)
+  for (i in 1:n_permutations) {
+    perm_country <- sample(judging_with_disc$Country)  # permute diver nationalities
+    
+    judging_perm <- judging_with_disc %>%
+      mutate(perm_match = perm_country == JCountry)
+    
+    perm_diffs[i] <- mean(judging_perm$discrepancy[judging_perm$perm_match], na.rm = TRUE) -
+                     mean(judging_perm$discrepancy[!judging_perm$perm_match], na.rm = TRUE)
+  }
+
+  # 6. Compute p-value (two-sided)
+  p_val <- mean(abs(perm_diffs) >= abs(observed_diff))
+
+  # 7. Save result
+  results <- rbind(results, data.frame(Judge = judge, observed_diff = observed_diff, p_value = p_val))
+}
+
+head(results)
+results <- results %>% 
+  arrange(desc(observed_diff))
+
+head(results)
+
+```
+
+Michael Geissbuhler, Hans-Peter Burk, Walter ALT, and Peter HUBER have the highest discrepancies and all of which are statistically significant
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+```{r}
+```
+
+7.2.2. Task 
+
+```{r}
+#fit model 1 from 7.2.1
+tto = read.csv("../data/07_tto.csv")
+head(tto)
+
+
+tto_model_1 <- lm(EVENT_WOBA_19 ~ factor(ORDER_CT)+ WOBA_FINAL_BAT_19+WOBA_FINAL_PIT_19+factor(HAND_MATCH)+factor(BAT_HOME_IND) + 0, data = tto)
+summary(tto_model_1)
+```
+We see that all the p-values are below 0 except for a hand match, which is likely due to the fact that there is a low amount of hand match values 0.5. Thus, these coefficients are likely reliable.
+```{r}
+#fit model 2 
+tto_model_2 <- lm(EVENT_WOBA_19 ~ factor(ORDER_CT) + BATTER_SEQ_NUM + WOBA_FINAL_BAT_19+WOBA_FINAL_PIT_19+factor(HAND_MATCH)+factor(BAT_HOME_IND), data = tto)
+summary(tto_model_2)
+
+```
+We see here that the p values drastically increase for the times through the order terms. This is likely because the batting sequence number is much more important to the regression model and thus the TTO terms are not as important. 
+
+Thus, we can conclude that pitcher decline through TTO is not significant since p >> 0.05. Pitcher fatigue as a game progresses (represented by the batter sequence number) is likely a greater factor in the regression model than TTO.
