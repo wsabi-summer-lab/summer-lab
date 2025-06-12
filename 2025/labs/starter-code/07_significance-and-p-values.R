@@ -4,7 +4,6 @@
 
 # install.packages(c("ggplot2", "splines", "tidyverse"))
 library(ggplot2)
-library(splines)
 library(tidyverse)
 
 # set seed
