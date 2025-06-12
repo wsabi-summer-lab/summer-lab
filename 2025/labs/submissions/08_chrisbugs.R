@@ -76,6 +76,10 @@ ggplot(nba_players_CI_plot, aes(x = reorder(Player, FT_percent), y = FT_percent)
 
 # The Wald CI's are larger on the upper bound than the AC's
 
+
+
+##### THIS IS THE SIMULATION
+
 # Create an interval from 0 to 1 with 1000 equally spaced points
 x = seq(0, 1, length.out = 1000)
 
@@ -145,6 +149,9 @@ coverage_df <- data.frame(
   pivot_longer(cols      = c(Wald, Agresti),
                names_to  = "Method",
                values_to = "Coverage")
+
+
+
 
 ## 2.  STEP 5 – heat-map of coverage for every (p, n) -------------------------
 ggplot(coverage_df,

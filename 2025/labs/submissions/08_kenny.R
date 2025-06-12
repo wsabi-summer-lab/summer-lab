@@ -81,7 +81,7 @@ sim_data <- expand.grid(p = interval, n = n) %>%
     wald_upper = p + 1.96 * sqrt(p * (1 - p) / n),
     agresti_lower = (p * n + 1.96^2 / 2) / (n + 1.96^2) - 1.96 * sqrt((p * (1 - p) + 1.96^2 / (4 * n)) / (n + 1.96^2)),
     agresti_upper = (p * n + 1.96^2 / 2) / (n + 1.96^2) + 1.96 * sqrt((p * (1 - p) + 1.96^2 / (4 * n)) / (n + 1.96^2))
-  )
+)
 
 ggplot(sim_data, aes(x = p)) +
   geom_ribbon(aes(ymin = wald_lower, ymax = wald_upper, fill = "Wald"), alpha = 0.3) +

@@ -1,0 +1,138 @@
+---
+title: "Lab 8"
+output: html_notebook
+---
+
+8.1.2 Task
+
+```{r}
+#1 - filter to include only at least 25 FT attempted 
+
+library(ggplot2)
+library(tidyverse)
+set.seed(8)
+
+nba = read.csv('../data/08_nba-free-throws.csv', sep = ';')
+head(nba)
+
+
+nba$FTM <- nba$FT. * nba$FTA 
+nba$tot_FTA <- nba$FTA * nba$G
+nba$tot_FTM <- nba$FTM * nba$G
+
+nba_cleaned <- nba %>% 
+  group_by(Player) %>%
+  summarise(
+    FTA = sum(FTA, na.rm = TRUE),
+    tot_FTA = sum(tot_FTA, na.rm = TRUE),
+    tot_FTM = sum(tot_FTM, na.rm = TRUE),
+    FT_percent = sum(FT., na.rm = TRUE) / n(),  # or compute FT% from FTM/FTA if you have that
+    .groups = 'drop'
+  ) %>%
+  filter(tot_FTA >= 25) %>% 
+  select(Player, FTA, tot_FTA, FT_percent, tot_FTM)
+
+head(nba_cleaned)
+
+nba_summary <- nba_cleaned %>%
+  mutate(
+    wald_se = sqrt((FT_percent * (1 - FT_percent)) / FTA),
+    wald_lower = FT_percent - 1.96 * wald_se,
+    wald_upper = FT_percent + 1.96 * wald_se
+  )
+
+nba_summary <- nba_summary %>%
+  mutate(
+    n_tilde = tot_FTA + 4,
+    p_tilde = (tot_FTM + 2) / n_tilde,
+    ac_se = sqrt((p_tilde * (1 - p_tilde)) / n_tilde),
+    ac_lower = p_tilde - 1.96 * ac_se,
+    ac_upper = p_tilde + 1.96 * ac_se
+  )
+
+nba_summary <- nba_summary %>%
+  slice_sample( n = 25)
+
+
+ggplot(nba_summary, aes(x = reorder(Player, -FT_percent), y = FT_percent)) +
+  geom_bar(stat = "identity", fill = "orchid", color = "black") +
+  geom_errorbar(aes(ymin = wald_lower, ymax = wald_upper), width = 0.2, color = "darkmagenta", alpha = 0.7) +
+  geom_errorbar(aes(ymin = ac_lower, ymax = ac_upper), width = 0.2, color = "steelblue", linetype = "dashed", alpha = 0.7) +
+  coord_flip() +
+  labs(
+    title = "Free Throw % with Wald and Agresti-Coull Intervals (≥ 25 Attempts)",
+    x = "Player",
+    y = "Free Throw Percentage"
+  ) +
+  theme_minimal()
+
+
+```
+We can see that the Agresti - Coull intervals are generally much lower than the Wald intervals, showing how they are much more stable 
+
+Task 8.2.1
+
+```{r}
+#1 - create a sequence of 1000 values between 0 and 1
+interval = seq(0, 1, length.out = 1000)
+
+# 2 - for each n and p generate free throws 
+n_values = c(10, 50, 100, 250, 500, 1000)
+reps <- 1:100
+sim_grid <- expand.grid(p = interval, n = n_values, rep = reps)
+sim_grid$made_fts <- mapply(function(p, n) rbinom(1, n, p), sim_grid$p, sim_grid$n)
+sim_grid$FT_percent <- sim_grid$made_fts / sim_grid$n
+
+
+
+#3 compute confidence intervals
+  simulation <- sim_grid %>% 
+  mutate(
+    wald_se = sqrt(FT_percent*(1-FT_percent)/n),
+    wald_lower = FT_percent - 1.96*wald_se ,
+    wald_upper = FT_percent + 1.96*wald_se ,
+    n_tilde = n + 4 ,
+    p_tilde = (made_fts + 2) / n_tilde ,
+    ac_se = sqrt((p_tilde * (1 - p_tilde)) / n_tilde),
+    ac_lower = p_tilde - 1.96 * ac_se,
+    ac_upper = p_tilde + 1.96 * ac_se
+  )
+
+
+#5 plot coverage
+coverage <- simulation %>%
+  mutate(
+    wald_covered = (p >= wald_lower & p <= wald_upper),
+    ac_covered = (p >= ac_lower & p <= ac_upper)
+  ) %>%
+  group_by(p,n) %>%
+  summarise(
+    wald_coverage = mean(wald_covered),
+    ac_coverage = mean(ac_covered),
+    .groups = 'drop'
+  )
+
+coverage_long <- coverage %>%
+  pivot_longer(cols = c(wald_coverage, ac_coverage),
+               names_to = "method", values_to = "coverage")
+
+ggplot(coverage_long, aes(x = p, y = coverage, color = as.factor(n))) +
+  geom_line(size = 1) +
+  geom_hline(yintercept = 0.95, linetype = "dashed", color = "gray") +
+  facet_wrap(~ method, ncol = 1) +
+  labs(
+    title = "Empirical Coverage of Confidence Intervals",
+    x = "True Probability (p)",
+    y = "Coverage",
+    color = "Sample Size (n)"
+  ) +
+  theme_minimal()
+
+```
+
+8.3.2 
+
+```{r}
+#2 - bets needed to be confident 
+```
+

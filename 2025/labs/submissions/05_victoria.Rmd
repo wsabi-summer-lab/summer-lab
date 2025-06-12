@@ -74,7 +74,7 @@ ggplot(defensive_effects, aes(x = factor(INNING), y =DT_YR, fill = mean_runs)) +
 innings$OT_YR <- as.factor(innings$OT_YR)
 innings$DT_YR <- as.factor(innings$DT_YR)
 innings$PARK  <- as.factor(innings$PARK)
-model <- lm(INN_RUNS ~ OT_YR + DT_YR + PARK, data = innings)
+model <- lm(INN_RUNS ~ PARK + OT_YR + DT_YR, data = innings)
 model
 
 
@@ -126,7 +126,7 @@ ggplot(mean_vs_predicted, aes(x = mean_runs, y = predicted_runs)) +
 
 # 3 out of sample predictive performance for model
 
-park_lm = lm(INN_RUNS ~PARK, data = innings)
+park_lm = lm(INN_RUNS ~ PARK, data = innings)
 
 performance = function(formula, data,  test_frac = .2) {
   set.seed(42)
@@ -147,7 +147,7 @@ performance = function(formula, data,  test_frac = .2) {
 innings$park_predicted_runs <- predict(park_lm, newdata = innings)
 
 performance(INN_RUNS ~ PARK, innings)
-performance(INN_RUNS ~ OT_YR + DT_YR + PARK, innings)
+performance(INN_RUNS ~ PARK + OT_YR + DT_YR, innings)
 
 ```
 
