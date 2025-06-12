@@ -1,0 +1,150 @@
+---
+title: "Lab 8"
+output:
+  pdf_document: default
+  html_document: default
+date: "2025-06-11"
+---
+
+
+## R Markdown
+
+
+```{r task1, echo=FALSE}
+#############
+### SETUP ###
+#############
+
+# install.packages(c("ggplot2", "tidyverse"))
+library(ggplot2)
+library(tidyverse)
+library(broom)
+
+# set seed
+set.seed(8)
+
+#######################
+### NBA FREE THROWS ###
+#######################
+
+# load data
+nba_players = read.csv("../data/08_nba-free-throws.csv", sep = ";")
+data = nba_players %>%
+  group_by(Player) %>%
+  summarise(
+    FT = sum(FT*G, na.rm = TRUE),
+    FTA = sum(FTA*G, na.rm = TRUE),
+    G = sum(G, na.rm = TRUE)
+  ) %>%
+  filter(FTA >= 25) %>% 
+  mutate(FT. = FT/FTA,
+         FT.ag = (FT+2)/(FTA+4)) %>% 
+  arrange(desc(FT.)) %>% 
+  mutate(
+    w.low = FT.- 1.96*sqrt((FT.*(1-FT.))/FTA),
+    w.high = FT. + 1.96*sqrt((FT.*(1-FT.))/FTA),
+    ag.low = FT.ag - 1.96*sqrt((FT.ag*(1-FT.ag))/(FTA+4)),
+    ag.high = FT.ag + 1.96*sqrt((FT.ag*(1-FT.ag))/(FTA+4))
+  ) %>% 
+  slice_sample(n=50)
+
+ggplot(data, aes(x = FT., y = fct_reorder(Player, FT.))) +
+  geom_point() +
+  labs(
+    title = "NBA Free Throw Percentage",
+    x = "Free Throw Percentage",
+    y = "Player"
+  ) +
+  theme_minimal() +
+  geom_errorbarh(aes(xmin = w.low, xmax = w.high), height = 0.2, color = "blue") +
+  geom_errorbarh(aes(xmin = ag.low, xmax = ag.high), height = 0.2, color = "red") 
+ 
+
+
+```
+
+for FT% above 50%, agresti drags the interval down, and vice versa for FT% below 50%
+
+```{r task 2, echo=FALSE}
+
+P = ppoints(1000)
+N = c(10, 50, 100, 250, 500, 1000)
+results = tibble()
+
+  for (p in P) {
+    for (n in N) {
+      ind_results = tibble(n = rep(n, 100),
+                           p = rep(p, 100),
+                           FTM = rbinom(n = 100, size = n, prob = p),
+                           FT_perc = FTM / n,
+                           FT_ag = (FTM + 2) / (n + 4),
+                           w_low = FT_perc - 1.96 * sqrt((FT_perc * (1 - FT_perc)) / n),
+                           w_high = FT_perc + 1.96 * sqrt((FT_perc * (1 - FT_perc)) / n),
+                           ag_low = FT_perc - 1.96 * sqrt((FT_ag * (1 - FT_ag)) / (n + 4)),
+                           ag_high = FT_perc + 1.96 * sqrt((FT_ag * (1 - FT_ag)) / (n + 4)))
+      
+      results = bind_rows(results, ind_results)
+    }
+  }
+
+results
+cov = results %>% 
+  group_by(n, p) %>% 
+  summarise(
+    cov_w = mean((w_low <= p) & (p <= w_high)),
+    cov_ag = mean((ag_low <= p) & (p <= ag_high))
+  )
+cov
+
+ggplot(cov, aes(x = p, y = cov_w, color = "Wald")) +
+  geom_point() +
+  geom_point(aes(y = cov_ag, color = "Agresti-Coull")) +
+  labs(
+    title = "Coverage Probability of Wald and Agresti-Coull Intervals",
+    x = "Sample Size (n)",
+    y = "Coverage Probability",
+    color = "Interval Type"
+  ) +
+  scale_color_manual(values = c("Wald" = "blue", "Agresti-Coull" = "red")) +
+  geom_hline(yintercept = 0.95, linetype = "dashed", color = "black") +
+  theme_minimal() +
+  facet_wrap(~n, scales = "free_y") 
+
+
+
+```
+
+```{r problem 2}
+
+break_even = 11/21
+
+P = seq(0.53, 0.99, by = 0.005)
+
+results = tibble()
+for (p in P) {
+  n = 1
+  greater = 0
+  while (greater < 0.975) {
+  makes = rbinom(n = 100, size = n, prob = p)
+  perc = makes / n
+  n = n+1
+  greater = mean(perc > break_even)
+  }
+  ind_results = tibble(
+    p = p,
+    n = n
+  )
+  results = bind_rows(results, ind_results)
+}
+
+ggplot(results, aes(x = p, y = n)) +
+  geom_line() +
+  labs(
+    title = "Sample Size Required for 97.5% Probability of Winning",
+    x = "Free Throw Percentage (p)",
+    y = "Sample Size (n)"
+  ) +
+  theme_minimal()
+
+```
+did work i am him
