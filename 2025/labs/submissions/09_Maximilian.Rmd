@@ -1,0 +1,433 @@
+---
+title: "09_Maximilian"
+author: "Maximilian J. Gebauer"
+date: "2025-06-11"
+output: html_document
+---
+
+```{r Setup, include=FALSE, results='hide', warning=FALSE}
+knitr::opts_chunk$set(echo = T, fig.width=8, fig.height=4)
+options(scipen = 0, digits = 3)  # controls base R output
+
+# Package setup
+if(!require("pacman")) install.packages("pacman")
+
+pacman::p_load(tidyverse, dplyr, ggthemes, data.table, lubridate, glmnet,
+               GGally, RColorBrewer, ggsci, plotROC, usmap,
+               plotly, ggpubr, vistime, coefplot, skimr, car, ggrepel, slider, lubridate,
+               tidymodels,ranger,vip,ggplot2, tune,dials,pdp, purrr, stringr, lmtest,
+               sandwich, nnet, doParallel, foreach)
+```
+
+```{r}
+set.seed(8)
+```
+
+```{r}
+nba_players <- read.csv("../data/08_nba-free-throws.csv", sep = ";")
+```
+
+```{r}
+head(nba_players)
+```
+
+```{r}
+set.seed(8)
+agg_data <- nba_players %>%
+  group_by(Player) %>%
+  mutate(
+    Total_FTA = round(sum(FTA * G), digits=0),
+    Total_FTM = round(sum(FT * G), digits=0),
+    FT_percent = Total_FTM / Total_FTA * 100
+  ) %>%
+  filter(Total_FTA > 24) %>%
+  select(Player, Total_FTA, Total_FTM, FT_percent) %>%
+  unique() %>%
+  arrange(Total_FTA) %>%
+  ungroup()
+
+agg_data$Player <- as.factor(agg_data$Player)
+
+agg_data_sub <- agg_data %>% 
+  slice_sample(n=30)
+
+
+```
+
+```{r, fig.width=10, fig.height=6, warning=FALSE, message=FALSE}
+wald_ci <- function(x, n) {
+  p <- x / n
+  se <- sqrt(p * (1 - p) / n)
+  lower <- p - 1.96 * se
+  upper <- p + 1.96 * se
+  c(lower, upper)
+}
+
+# Agresti-Coull 95% CI function
+ac_ci <- function(x, n) {
+  z <- 1.96
+  n_adj <- n + 4
+  p_adj <- (x + 2) / n_adj
+  se_adj <- sqrt(p_adj * (1 - p_adj) / n_adj)
+  lower <- (x/n) - z * se_adj
+  upper <- (x/n) + z * se_adj
+  c(lower, upper)
+}
+
+agg_data_with_ci <- agg_data_sub %>%
+  rowwise() %>%
+  mutate(
+    FT = Total_FTM / Total_FTA,
+    wald_low = wald_ci(Total_FTM, Total_FTA)[1] * 100,
+    wald_high = wald_ci(Total_FTM, Total_FTA)[2] * 100,
+    ac_low = ac_ci(Total_FTM, Total_FTA)[1] * 100,
+    ac_high = ac_ci(Total_FTM, Total_FTA)[2] * 100
+  ) %>%
+  ungroup()
+
+ggplot(agg_data_with_ci, aes(x = reorder(Player, FT_percent), y = FT_percent)) +
+  geom_point(color = "black", size = 2) +
+  
+  # Slight left shift for Wald CI
+  geom_errorbar(
+    aes(ymin = wald_low, ymax = wald_high),
+    width = 0.2, color = "red", alpha = 0.6,
+    position = position_nudge(x = -0.2)
+  ) +
+
+  # Slight right shift for Agresti-Coull CI
+  geom_errorbar(
+    aes(ymin = ac_low, ymax = ac_high),
+    width = 0.2, color = "blue", alpha = 0.6,
+    position = position_nudge(x = 0.2)
+  ) +
+
+  coord_flip() +
+  labs(
+    title = "Free Throw Percentage with 95% Wald and Agresti-Coull Confidence Intervals",
+    x = "Player",
+    y = "FT%"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+p_vec    <- seq(0, 1, length.out = 1000)
+p_vec    <- p_vec[p_vec != 0 & p_vec != 1]
+n_vec    <- c(10, 50, 100, 250, 500, 1000)
+num_sims <- 100
+
+coverage_fn <- function(p, n, num_sims) {
+  x <- rbinom(num_sims, size = n, prob = p)
+  phat <- x / n
+  se_w <- sqrt(phat * (1 - phat) / n)
+  wald_l <- phat - qnorm(0.975) * se_w
+  wald_u <- phat + qnorm(0.975) * se_w
+  cov_w <- mean(wald_l <= p & wald_u >= p)
+  
+  # Agresti–Coull ("add‐2") CI
+  n_tilde <- n + 4
+  phat_tilde <- (x + 2) / n_tilde
+  se_a <- sqrt(phat_tilde * (1 - phat_tilde) / n_tilde)
+  ag_l <- x - qnorm(0.975) * se_a
+  ag_u <- x + qnorm(0.975) * se_a
+  cov_a <- mean(ag_l <= p & ag_u >= p)
+  
+  c(coverage_wald = cov_w, coverage_ag = cov_a)
+}
+
+# build results data.frame
+results <- expand.grid(p = p_vec, n = n_vec) %>%
+  rowwise() %>%
+  mutate(
+    cov = list(coverage_fn(p, n, num_sims))
+  ) %>%
+  unnest_wider(cov) %>%
+  ungroup()
+
+plot_data <- results %>%
+  pivot_longer(
+    cols      = c(coverage_wald, coverage_ag),
+    names_to  = "method",
+    values_to = "coverage"
+  ) %>%
+  # explicitly convert the raw names to exactly the labels you want
+  mutate(
+    method = case_when(
+      method == "coverage_ag" ~ "Wald CI",
+      method == "coverage_wald"   ~ "Agresti–Coull CI"
+    ),
+    n = factor(n)
+  )
+
+# coverage vs p, colored by method, facetted by n
+ggplot(plot_data, aes(x = p, y = coverage, color = as.factor(method))) +
+  geom_line(alpha = 0.8) +
+  facet_wrap(~ n, ncol = 3) +
+  labs(
+    title = "Empirical Coverage of 95% Wald vs Agresti–Coull CIs",
+    x = expression(p),
+    y = "Coverage Probability",
+    color = "CI Method"
+  ) +
+  geom_hline(yintercept = 0.95, linetype = "dashed") +
+  theme_minimal()
+```
+
+```{r}
+num_red <- 18
+num_not_red <- 93
+(total <- num_red + num_not_red)
+```
+```{r}
+reds <- rep("red", num_red)
+non_reds <- rep("not_red", num_not_red)
+
+all_colors <- c(reds, non_reds)
+all_colors <- factor(all_colors, levels = c("red", "not_red"))
+```
+
+```{r}
+true_p_hat <- num_red / total
+
+z <- 1.96
+
+se_p_hat <- sqrt(true_p_hat * (1 - true_p_hat) / total)
+
+(wald_low <- true_p_hat - z * se_p_hat)
+true_p_hat
+(wald_high <- true_p_hat + z * se_p_hat)
+```
+
+```{r}
+true_p_hat <- num_red / total
+
+z <- 1.96
+
+p_hat_star <- (num_red + 2) / (total + 4)
+
+se_p_hat_star <- sqrt(p_hat_star * (1 - p_hat_star) / (total + 4))
+
+(ac_low <- true_p_hat - z * se_p_hat_star)
+true_p_hat
+(ac_high <- true_p_hat + z * se_p_hat_star)
+```
+
+```{r}
+set.seed(9)
+num_trials <- 1000000
+
+reds <- rep("red", num_red)
+non_reds <- rep("not_red", num_not_red)
+
+all_colors <- c(reds, non_reds)
+all_colors <- factor(all_colors, levels = c("red", "not_red"))
+
+p_hat_trials <- rep(NA, num_trials)
+
+for (i in 1:num_trials) {
+  sample_colors <- sample(all_colors, size = total, replace = TRUE)
+  num_reds_sampled <- sum(sample_colors == "red")
+  
+  p_hat_trials[i] <- num_reds_sampled / total
+}
+```
+
+```{r,fig.width=10, fig.height=6}}
+(lower_boot <- quantile(p_hat_trials, 0.025))
+(upper_boot <- quantile(p_hat_trials, 0.975))
+
+hist(p_hat_trials, breaks = 50, main = "Distribution of p-hat from 1,000,000 Trials \n ",
+     xlab = "p-hat", col = "lightblue", border = "black")
+abline(v = lower_boot, col = "red", lwd = 1)
+abline(v = upper_boot, col = "red", lwd = 1)
+```
+
+
+P_Hat: 0.162
+Bootstrap Interval: (0.0991, 0.234), Width = 0.135
+Wald Interval: (0.0936, 0.231), Width = 0.137
+Agresti-Coull Interval: (0.0929, 0.231), Width = 0.138
+
+Widths are nearly identical, which is not unexpected given the observed proportion of reds (0.162) is neither too close to 0 or 1 and the sample size is relatively large (111). I ran the bootstrap simulation with 1,000,000 trials to ensure a stable estimate of the bootstrap confidence interval. For my sample, the realtive coverages of the three are nearly identical.
+
+
+The below chunk computes bootstrap intervals for each player randomly sampled in the previous Lab.
+
+```{r}
+set.seed(8)
+
+num_trials <- 10000
+
+num_players <- nrow(agg_data_sub)
+lower_boot <- rep(NA, num_players)
+upper_boot <- rep(NA, num_players)
+
+for (i in 1:num_players) {
+    player <- agg_data_sub$Player[i]
+    total_fta <- agg_data_sub$Total_FTA[i]
+    total_ftm <- agg_data_sub$Total_FTM[i]
+    
+    p_hat <- total_ftm / total_fta
+    
+    bootstrap_samples <- replicate(num_trials, {
+      sample_ftm <- rbinom(1, size = total_fta, prob = p_hat)
+      sample_fta <- total_fta
+      sample_p_hat <- sample_ftm / sample_fta
+      return(sample_p_hat)
+    })
+    
+    lower_boot[i] <- quantile(bootstrap_samples, 0.025)
+    upper_boot[i] <- quantile(bootstrap_samples, 0.975)
+}
+
+new_interval_df <- agg_data_sub
+
+new_interval_df$lower_boot <- lower_boot
+new_interval_df$upper_boot <- upper_boot
+```
+
+Below is the plot for the random smaple of 30 players with all three CIs plotted along with their observed proportion of successes. 
+```{r, fig.width=10, fig.height=6, warning=FALSE, message=FALSE}
+complete_results <- agg_data_with_ci %>%
+  left_join(new_interval_df %>% 
+              select(Player, lower_boot, upper_boot), 
+            by = "Player")
+
+ggplot(complete_results, aes(x = reorder(Player, FT_percent), y = FT_percent)) +
+  geom_point(color = "black", size = 2) +
+  geom_errorbar(
+    aes(ymin = wald_low, ymax = wald_high, color = "Wald"),
+    width = 0.2, alpha = 0.6,
+    position = position_nudge(x = -0.2),
+    show.legend = TRUE
+  ) +
+  geom_errorbar(
+    aes(ymin = ac_low, ymax = ac_high, color = "Agresti–Coull"),
+    width = 0.2, alpha = 0.6,
+    position = position_nudge(x = 0.2),
+    show.legend = TRUE
+  ) +
+  geom_errorbar(
+    aes(ymin = lower_boot * 100, ymax = upper_boot * 100, color = "Bootstrap"),
+    width = 0.2, alpha = 0.6,
+    position = position_nudge(x = 0.4),
+    show.legend = TRUE
+  ) +
+  scale_color_manual(
+    name   = "CI method",
+    values = c(
+      "Wald"          = "red",
+      "Agresti–Coull" = "blue",
+      "Bootstrap"     = "green"
+    )
+  ) +
+  coord_flip() +
+  labs(
+    title = "Free Throw Percentage with 95% Wald, Bootstrap, and Agresti–Coull CIs",
+    x     = "Player",
+    y     = "FT%"
+  ) +
+  theme_minimal()
+```
+
+Compute all three intervals and their empirical coverage rates in a simulation study
+
+```{r}
+p_vec    <- seq(0, 1, length.out = 1000)
+p_vec    <- p_vec[p_vec != 0 & p_vec != 1]
+n_vec    <- c(10, 50, 100, 250, 500, 1000)
+num_sims <- 100
+B        <- 500                       
+z        <- qnorm(0.975)
+
+coverage_fn <- function(p, n, num_sims, B) {
+  x      <- rbinom(num_sims, size = n, prob = p)
+  phat   <- x / n
+  se_w   <- sqrt(phat * (1 - phat) / n)
+  wald_l <- phat - z * se_w
+  wald_u <- phat + z * se_w
+  cov_w  <- mean(wald_l <= p & wald_u >= p)
+  
+  n_tilde    <- n + 4
+  phat_tilde <- (x + 2) / n_tilde
+  phat   <- x / n
+  se_a       <- sqrt(phat_tilde * (1 - phat_tilde) / n_tilde)
+  ag_l       <- phat - z * se_a
+  ag_u       <- phat + z * se_a
+  cov_a      <- mean(ag_l <= p & ag_u >= p)
+  
+  cov_b <- mean(map_lgl(x, function(x_i) {
+    data_i    <- c(rep(1, x_i), rep(0, n - x_i))
+    phat_star <- replicate(B, mean(sample(data_i, size = n, replace = TRUE)))
+    ci        <- quantile(phat_star, probs = c(0.025, 0.975))
+    (ci[1] <= p) && (p <= ci[2])
+  }))
+  
+  tibble(
+    coverage_wald = cov_w,
+    coverage_ag   = cov_a,
+    coverage_boot = cov_b
+  )
+}
+
+grid <- expand.grid(p = p_vec, n = n_vec)
+
+cores <- parallel::detectCores() - 1
+cl    <- makeCluster(cores)
+registerDoParallel(cl)
+
+results <- foreach(i = seq_len(nrow(grid)), .combine = bind_rows, .packages = c("dplyr","purrr")) %dopar% {
+  pi <- grid$p[i]
+  ni <- grid$n[i]
+  
+  coverage_fn(pi, ni, num_sims, B) %>%
+    mutate(p = pi, n = ni)
+}
+
+stopCluster(cl)
+
+plot_data <- results %>%
+  pivot_longer(
+    cols      = starts_with("coverage_"),
+    names_to  = "method",
+    values_to = "coverage"
+  ) %>%
+  mutate(
+    method = case_when(
+      method == "coverage_wald" ~ "Wald CI",
+      method == "coverage_ag"   ~ "Agresti–Coull CI",
+      method == "coverage_boot" ~ "Bootstrap CI"
+    ),
+    n = factor(n)
+  )
+```
+
+All three are plotted below. Boot performs similairly to AC with both out performing Wald in cases where n is small and/or p is close to 0 or 1.
+
+```{r}
+ggplot(plot_data, aes(x = p, y = coverage, color = method)) +
+  geom_line(alpha = 0.8) +
+  facet_wrap(~ n, ncol = 3, labeller = label_both) +
+  geom_hline(yintercept = 0.95, linetype = "dashed") +
+  scale_color_manual(
+    name   = "CI Method",
+    values = c(
+      "Wald CI"          = "red",
+      "Agresti–Coull CI" = "blue",
+      "Bootstrap CI"     = "yellow"
+    )
+  ) +
+  labs(
+    title = "Empirical Coverage of 95% CIs: Wald, Agresti–Coull, and Bootstrap",
+    x     = expression(p),
+    y     = "Coverage Probability"
+  ) +
+  theme_minimal()
+```
+
+
+
+
+
+
