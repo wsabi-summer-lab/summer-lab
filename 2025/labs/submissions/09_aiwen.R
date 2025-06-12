@@ -171,7 +171,7 @@ p_values <- seq(0, 1, length.out = 1000)
 n_values <- c(10, 50, 100, 250, 500, 1000)
 results <- data.frame()
 
-M <- 5
+M <- 20
 for (n in n_values) {
   for (p in p_values) {
     for (i in 1:M) {
@@ -191,30 +191,29 @@ results <- results %>%
     upper_agresti = prop_success + 1.96 * sqrt((prop_success_hat * (1 - prop_success_hat)) / (n + 4))
   )
 
-## add bootstrap confidence intervals
-B <- 1000 # number of bootstrap samples
-bootstrap_results <- results %>%
-  group_by(n, p) %>%
-  summarise(bootstrap_lower = NA, bootstrap_upper = NA, .groups = 'drop')
-for (i in 1:B) {
-  bootstrap_samples <- results %>%
-    group_by(n, p) %>%
-    summarise(sample = list(rbinom(n, size = 1, prob = p)), .groups = 'drop')
-  
-  bootstrap_proportions <- bootstrap_samples %>%
-    mutate(prop_success = sapply(sample, function(x) mean(x))) %>%
-    select(-sample)
-  
-  bootstrap_results <- bootstrap_results %>%
-    left_join(bootstrap_proportions, by = c("n", "p")) %>%
-    mutate(
-      bootstrap_lower = quantile(prop_success, 0.025),
-      bootstrap_upper = quantile(prop_success, 0.975)
-    )
-}
-results <- results %>%
-  left_join(bootstrap_results %>% select(n, p, bootstrap_lower, bootstrap_upper), by = c("n", "p"))
+B <- 1000  # number of bootstrap replicates
 
+# Function to calculate bootstrap confidence interval for a given sample
+bootstrap_ci <- function(sample, B = 1000) {
+  boot_props <- replicate(B, {
+    boot_sample <- sample(sample, size = length(sample), replace = TRUE)
+    mean(boot_sample)
+  })
+  quantile(boot_props, probs = c(0.025, 0.975))
+}
+
+# Apply bootstrap confidence interval row by row
+results <- results %>%
+  rowwise() %>%
+  mutate(
+    # simulate the sample that led to prop_success
+    sample_vector = list(c(rep(1, round(n * prop_success)), rep(0, n - round(n * prop_success)))),
+    boot_ci = list(bootstrap_ci(sample_vector[[1]], B)),
+    lower_bootstrap = boot_ci[[1]],
+    upper_bootstrap = boot_ci[[2]]
+  ) %>%
+  ungroup() %>%
+  select(-sample_vector, -boot_ci)
 
 coverage_results <- results %>%
   group_by(n, p) %>%
