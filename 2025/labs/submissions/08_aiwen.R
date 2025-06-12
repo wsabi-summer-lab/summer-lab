@@ -174,3 +174,36 @@ coverage_results %>%
        y = "Coverage Probability",
        color = "Sample Size (n)") +
   theme_minimal()
+
+#-----------------------------------------------------------------------------------------------------
+
+################
+# code for math part of lab (betting)
+
+p_be <- 11 / 21
+z <- qnorm(0.975)
+
+p_values <- seq(p_be + 1e-4, 1, length.out = 100)
+
+# required n for each p
+n_required <- numeric(length(p_values))
+for (i in 1:length(p_values)) {
+  p <- p_values[i]
+  num <- z * sqrt(p * (1 - p))
+  denom <- p - p_be
+  n_required[i] <- ceiling((num / denom)^2)
+}
+
+# dataframe for lpotting
+plot_data <- data.frame(
+  p = p_values,
+  n = n_required
+)
+
+ggplot(plot_data, aes(x = p, y = n)) +
+  geom_line(color = "blue", size = 1) +
+  geom_vline(xintercept = p_be, linetype = "dashed", color = "red") +
+  labs(title = "Number of Bets Needed for 95% Confidence of Profitability",
+       x = "True Success Rate (p)",
+       y = "Minimum Bets Needed (n)") +
+  theme_minimal()
