@@ -1,0 +1,131 @@
+---
+title: "10_Maximilian"
+author: "Maximilian J. Gebauer"
+date: "2025-06-13"
+output: html_document
+---
+
+```{r Setup, include=FALSE, results='hide', warning=FALSE}
+knitr::opts_chunk$set(echo = T, fig.width=8, fig.height=4)
+options(scipen = 0, digits = 3)  # controls base R output
+
+# Package setup
+if(!require("pacman")) install.packages("pacman")
+
+pacman::p_load(tidyverse, dplyr, ggthemes, data.table, lubridate, glmnet,
+               GGally, RColorBrewer, ggsci, plotROC, usmap,
+               plotly, ggpubr, vistime, coefplot, skimr, car, ggrepel, slider, lubridate,
+               tidymodels,ranger,vip,ggplot2, tune,dials,pdp, purrr, stringr, lmtest,
+               sandwich, nnet, doParallel, foreach)
+```
+
+Set of alphas and probs: p = c(5/16, 9/16, 2/16) and a = c(2.0, 3.5, 3.5)
+
+```{r}
+# ---------- Kelly allocation, unchanged ----------
+kelly_alloc <- function(p, a) {
+  idx <- order(p * a, decreasing = TRUE)
+  p_s <- p[idx];  a_s <- a[idx]
+  ratio <- (1 - cumsum(p_s)) / (1 - cumsum(1 / a_s))
+  b <- min(ratio[ratio > 0])                 # reserve fraction
+  f_s <- p_s - b / a_s
+  f_s[f_s < 0] <- 0
+  f <- numeric(length(p));  f[idx] <- f_s
+  list(fractions = f, reserve = b)
+}
+
+# ---------- simulation wrapper with BOTH metrics ----------
+run_sims <- function(p, a, num_sims = 10000, num_races = 2000,
+                     initial_bank = 1, skip_negEV = FALSE) {
+  ev <- p * a - 1                         # per-$ expected value
+  alloc <- kelly_alloc(p, a)
+  f     <- alloc$fractions
+  
+  bankroll_mat <- matrix(
+    NA_real_, nrow = num_sims, ncol = num_races + 1
+  )
+  
+  for (sim in seq_len(num_sims)) {
+    bank <- initial_bank
+    bankroll_mat[sim, 1] <- bank          # race 0
+    for (race in seq_len(num_races)) {
+      stake <- f * bank
+      if (skip_negEV) stake[ev < 0] <- 0  # skip –EV version
+      winner <- sample(seq_along(p), 1, prob = p)
+      bank   <- bank - sum(stake) + stake[winner] * a[winner]
+      bankroll_mat[sim, race + 1] <- bank
+    }
+  }
+  
+  # ----- arithmetic & geometric means across sims -----
+  arith_path <- colMeans(bankroll_mat)
+  geom_path  <- exp(colMeans(log(bankroll_mat)))  # E[log] → exp()
+  
+  list(arith = arith_path,
+       geom  = geom_path,
+       raw   = bankroll_mat)           # raw matrix returned for flexibility
+}
+
+# ---------- parameters ----------
+p <- c(5/16, 9/16, 2/16)
+a <- c(2.0, 3.5, 3.5)
+
+# ---------- run both strategies ----------
+res_kelly <- run_sims(p, a, skip_negEV = FALSE)   # pure Kelly
+res_skip  <- run_sims(p, a, skip_negEV = TRUE)    # skip –EV
+
+# ---------- quick comparison plots ----------
+
+```
+
+```{r}
+seg1 <- 90:101     # bankroll after races 1–100  (path index 2..101)
+seg2 <- 190:201   # bankroll after races 101–200 (index 102..201)
+seg3 <- 900:1000
+par(mfrow = c(2, 2))
+
+## ---- 1. Arithmetic mean, races 1–100 ------------------------------
+plot(90:101, res_kelly$arith[seg1], type = "l", lwd = 2,
+     main = "Arithmetic mean (races 1–100)",
+     xlab = "race", ylab = "mean bankroll")
+lines(90:101, res_skip$arith[seg1], col = 2, lwd = 2)
+legend("topleft", legend = c("Pure Kelly", "Skip –EV"),
+       lwd = 2, col = c(1, 2), bty = "n")
+
+## ---- 2. Arithmetic mean, races 101–200 ----------------------------
+plot(190:201, res_kelly$arith[seg2], type = "l", lwd = 2,
+     main = "Arithmetic mean (races 101–200)",
+     xlab = "race", ylab = "mean bankroll")
+lines(190:201, res_skip$arith[seg2], col = 2, lwd = 2)
+legend("topleft", legend = c("Pure Kelly", "Skip –EV"),
+       lwd = 2, col = c(1, 2), bty = "n")
+
+## ---- 3. Geometric mean, races 1–100 -------------------------------
+plot(90:101, res_kelly$geom[seg1], type = "l", lwd = 2,
+     main = "Geometric mean (races 1–100)",
+     xlab = "race", ylab = "geo-mean bankroll")
+lines(90:101, res_skip$geom[seg1], col = 2, lwd = 2)
+legend("topleft", legend = c("Pure Kelly", "Skip –EV"),
+       lwd = 2, col = c(1, 2), bty = "n")
+
+## ---- 4. Geometric mean, races 101–200 -----------------------------
+plot(190:201, res_kelly$geom[seg2], type = "l", lwd = 2,
+     main = "Geometric mean (races 101–200)",
+     xlab = "race", ylab = "geo-mean bankroll")
+lines(190:201, res_skip$geom[seg2], col = 2, lwd = 2)
+legend("topleft", legend = c("Pure Kelly", "Skip –EV"),
+       lwd = 2, col = c(1, 2), bty = "n")
+```
+
+```{r}
+mean(res_kelly$geom > res_skip$geom)
+mean(res_kelly$arith > res_skip$arith)
+```
+
+
+Kelly does better in long run wrt geometric mean, but the skip method outperforms it wrt arithmetic mean.
+
+
+
+
+
