@@ -130,9 +130,156 @@ ggplot(coverage_long, aes(x = p, y = coverage, color = as.factor(n))) +
 
 ```
 
-8.3.2 
+9.2.1 Task
 
 ```{r}
-#2 - bets needed to be confident 
+#1 - bootstrap for true FT% of all NBA players
+set.seed(42)
+n_boot <- 1000
+
+# Bootstrap function for a single player
+bootstrap_ci <- function(makes, total, reps = 1000) {
+  boot_props <- replicate(reps, {
+    sample <- sample(c(1, 0), size = total, replace = TRUE, prob = c(makes / total, 1 - makes / total))
+    mean(sample)
+  })
+  quantile(boot_props, probs = c(0.025, 0.975))
+}
+
+# Apply per player
+boot_intervals <- nba_cleaned %>%
+  mutate(
+    boot_ci = map2(tot_FTM, tot_FTA, ~bootstrap_ci(.x, .y, n_boot)),
+    boot_lower = map_dbl(boot_ci, 1),
+    boot_upper = map_dbl(boot_ci, 2)
+  ) %>%
+  select(-boot_ci)
+
 ```
 
+```{r}
+nba_summary <- nba_summary %>%
+  left_join(boot_intervals, by = "Player")
+
+
+ggplot(nba_summary, aes(x = reorder(Player, -FT_percent.x), y = FT_percent.x)) +
+  geom_bar(stat = "identity", fill = "orchid", color = "black") +
+  geom_errorbar(aes(ymin = wald_lower, ymax = wald_upper), width = 0.2, color = "darkmagenta", alpha = 0.7) +
+  geom_errorbar(aes(ymin = ac_lower, ymax = ac_upper), width = 0.2, color = "steelblue", linetype = "dashed", alpha = 0.7) +
+  geom_errorbar(aes(ymin = boot_lower, ymax = boot_upper), width = 0.2, color = "forestgreen", linetype = "dotdash", alpha = 0.9) +
+  coord_flip() +
+  labs(
+    title = "Free Throw % with Wald, Agresti-Coull, and Bootstrap Intervals (≥ 25 Attempts)",
+    x = "Player",
+    y = "Free Throw Percentage"
+  ) +
+  theme_minimal()
+
+```
+
+Task 3 - Bootstrap for simulation conducted in Task 8.2.2
+
+```{r}
+n_boot = 1000
+
+interval = seq(0, 1, length.out = 100)
+
+# 2 - for each n and p generate free throws 
+n_values = c(10, 100, 500)
+reps <- 1:100
+sim_grid <- expand.grid(p = interval, n = n_values, rep = reps)
+sim_grid$made_fts <- mapply(function(p, n) rbinom(1, n, p), sim_grid$p, sim_grid$n)
+sim_grid$FT_percent <- sim_grid$made_fts / sim_grid$n
+
+bootstrap_ci <- function(makes, total, n_boot = 1000) {
+  if (total == 0) return(c(NA, NA))  # skip rows with no attempts
+
+  prob <- makes / total
+
+  boot_props <- replicate(n_boot, {
+    sample_attempts <- sample(c(1, 0), size = total, replace = TRUE, prob = c(prob, 1 - prob))
+    mean(sample_attempts)
+  })
+
+  quantile(boot_props, probs = c(0.025, 0.975))
+}
+
+library(purrr)
+sim_grid2 <- sim_grid %>%
+  mutate(
+    boot_ci = pmap(list(made_fts, n), bootstrap_ci, n_boot = n_boot),
+    boot_lower = map_dbl(boot_ci, 1),
+    boot_upper = map_dbl(boot_ci, 2)
+  )
+
+```
+
+```{r}
+sim_grid2 %>%
+  filter(n == 100) %>%
+  ggplot(aes(x = p, y = FT_percent)) +
+  geom_point(alpha = 0.5, color = "black") +
+  geom_errorbar(aes(ymin = boot_lower, ymax = boot_upper), width = 0.01, color = "steelblue", alpha = 0.6) +
+  labs(
+    title = "Bootstrap 95% Confidence Intervals for Observed FT%",
+    subtitle = "Sample size n = 100",
+    x = "True FT% (p)",
+    y = "Observed FT% ± CI"
+  ) +
+  theme_minimal()
+```
+
+4 - coverage for the bootstrap method
+
+```{r}
+
+sim_grid2 <- sim_grid2 %>%
+  left_join(
+    simulation %>% select(p, n, wald_lower, wald_upper, ac_lower, ac_upper),
+    by = c("p", "n")
+  )
+
+coverage2 <- sim_grid2 %>%
+  mutate(
+    bootstrap_covered = (p >= boot_lower & p <= boot_upper),
+  ) %>%
+  group_by(p, n) %>%
+  summarise(
+    bootstrap_coverage = mean(bootstrap_covered, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+bootstrap_coverage <- coverage2 %>%
+  pivot_longer(cols = ends_with("coverage"),
+               names_to = "method", values_to = "coverage")
+```
+Plot these results
+
+```{r}
+
+ggplot(bootstrap_coverage, aes(x = p, y = coverage, color = as.factor(n))) +
+  geom_line(size = 1.2) +
+  geom_hline(yintercept = 0.95, linetype = "dashed", color = "gray40") +
+  labs(
+    title = "Bootstrap 95% CI Coverage",
+    subtitle = "Empirical coverage by true FT% and sample size",
+    x = "True Free Throw Probability (p)",
+    y = "Coverage Probability",
+    color = "Sample Size (n)"
+  ) +
+  theme_minimal()
+```
+```{r}
+ggplot(coverage_long, aes(x = p, y = coverage, color = as.factor(n))) +
+  geom_line(size = 1) +
+  geom_hline(yintercept = 0.95, linetype = "dashed", color = "gray") +
+  facet_wrap(~ method, ncol = 1) +
+  labs(
+    title = "Empirical Coverage of Confidence Intervals",
+    x = "True Probability (p)",
+    y = "Coverage",
+    color = "Sample Size (n)"
+  ) +
+  theme_minimal()
+```
+The coverage of the boostrapped interval looks similar to the wald coverage at 10 but more similar to the agresti coull at 100 and 500. We can assume that the coverage is approximately between wald and agresti coull in terms of robustness to n and p.
