@@ -1,0 +1,168 @@
+---
+title: "Lab 10 - Kelly Betting"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+#probabilities 
+p <- c(.55,.25,.1)
+alpha <- c(3,3.2,8) #choose so the latter two horses are negative
+
+kelly_df <- tibble(
+  horse = 1:3,
+  p = p,
+  alpha = alpha,
+  p_times_alpha = p * alpha
+) %>%
+  arrange(desc(p_times_alpha)) %>%
+  mutate(
+    p_t = cumsum(p),
+    sigma_t = cumsum(1 / alpha),
+    b_t = (1 - p_t) / (1 - sigma_t)
+  )
+
+# Step 2: Find smallest positive b_t
+b <- min(kelly_df$b_t[kelly_df$b_t > 0])
+
+# Step 3: Compute f_i
+kelly_df <- kelly_df %>%
+  mutate(
+    f = pmax(0, p - b / alpha)
+  )
+
+kelly_df
+```
+
+We see that although horses 2 and 3 are negative EV, the Kelly criterion suggests betting some fraction on them in order to maximize expected log 
+
+2 - simulate 1000 bets 100 times with two different strategies 
+```{r}
+#strategy 1 - follow kelly allocations 
+
+#kelly_df$probs <- kelly_df$f / sum(kelly_df$f) #normalize probabilities to sum to 1
+
+m <- 100
+n_bets <- 1000
+set.seed(42)
+
+kelly_paths <- list()
+
+for (i in 1:m) {
+  bankroll <- numeric(n_bets + 1)
+  bankroll[1] <- 1  # starting bankroll
+  
+  bets <- sample(1:3, n_bets, replace = TRUE, prob = kelly_df$f)
+  outcomes <- rbinom(n_bets, size = 1, prob = p[bets])  # simulate win/loss
+  
+  for (j in 1:n_bets) {
+    bet_fraction <- kelly_df$[bets[j]]  # fraction of bankroll wagered
+    profit <- outcomes[j] * kelly_df$alpha[bets[j]] * bet_fraction - bet_fraction
+    bankroll[j + 1] <- bankroll[j] * (1 + profit)
+  }
+  
+  kelly_paths[[i]] <- tibble(iteration = i, bet = 0:n_bets, bankroll = bankroll)
+}
+
+# Combine into a single dataframe for plotting
+kelly_df_plot <- bind_rows(kelly_paths) %>%
+  mutate(strategy = "Kelly")
+
+kelly_avg <- kelly_df_plot %>%
+  group_by(bet) %>%
+  summarise(avg_bankroll = mean(bankroll), .groups = "drop")
+
+ggplot(kelly_avg, aes(x = bet, y = avg_bankroll)) +
+  geom_line(color = "darkgreen", size = 1.2) +
+  labs(
+    title = "Average Bankroll Over Time (Kelly Strategy)",
+    x = "Bet Number",
+    y = "Average Bankroll"
+  ) +
+  theme_minimal()
+```
+```{r}
+#strategy 2 - following kelly for +EV horses 
+m = 100
+n_bets = 1000
+set.seed(42)
+
+# Compute EV
+kelly_df$EV <- p * alpha - 1
+
+kelly_new <- kelly_df %>% 
+  mutate(
+    newf = ifelse(EV < 0, 0, pmax(p - b / alpha, 0))
+  )
+
+kelly_new
+
+kelly_paths <- list()
+
+for (i in 1:m) {
+  bankroll <- numeric(n_bets + 1)
+  bankroll[1] <- 1  # starting bankroll
+  
+  bets <- sample(1:3, n_bets, replace = TRUE, prob = kelly_new$newf)
+  outcomes <- rbinom(n_bets, size = 1, prob = p[bets])  # simulate win/loss
+  
+  for (j in 1:n_bets) {
+  horse <- bets[j]
+  bet_fraction <- kelly_new$newf[horse]     # extract scalar value
+  alpha <- kelly_new$alpha[horse]           # extract scalar value
+  
+  profit <- outcomes[j] * alpha * bet_fraction - bet_fraction
+  bankroll[j + 1] <- bankroll[j] * (1 + profit)
+}
+  
+  kelly_paths[[i]] <- tibble(iteration = i, bet = 0:n_bets, bankroll = bankroll)
+}
+
+
+```
+
+4 - plot average bankroll between the two 
+
+```{r}
+# Combine into a single dataframe for plotting
+kelly_df_plot_2 <- bind_rows(kelly_paths) %>%
+  mutate(strategy = "Modified Kelly")
+
+kelly_avg_2 <- kelly_df_plot_2 %>%
+  group_by(bet) %>%
+  summarise(avg_bankroll = mean(bankroll), .groups = "drop")
+
+ggplot(kelly_avg_2, aes(x = bet, y = avg_bankroll)) +
+  geom_line(color = "darkgreen", size = 1.2) +
+  labs(
+    title = "Average Bankroll Over Time (Modified Kelly Strategy)",
+    x = "Bet Number",
+    y = "Average Bankroll"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+#plot both strategies for comparison
+merged_plot <- kelly_avg %>%
+  rename(avg_bankroll_kelly = avg_bankroll) %>%
+  inner_join(kelly_avg_2, by = "bet") %>%
+  pivot_longer(cols = starts_with("avg_bankroll"), names_to = "strategy", values_to = "avg_bankroll")
+merged_plot
+merged_plot$strategy <- as.factor(merged_plot$strategy)
+
+ggplot(merged_plot, aes(x = bet, y = avg_bankroll, color = strategy)) +
+  geom_line(size = 1.2) +
+  labs(
+    title = "Average Bankroll Over Time (Kelly vs Modified Kelly)",
+    x = "Bet Number",
+    y = "Average Bankroll"
+  ) +
+  #scale_color_manual(values = c("Kelly" = "lightcoral", "Modified Kelly" = "lightblue")) +
+  theme_minimal()
+
+```
+
