@@ -10,6 +10,7 @@ research
 ### FILES ###
 #############
 
+*.docx
 template*
 *.tex
 *.DS_Store
