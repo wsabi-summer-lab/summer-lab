@@ -1,0 +1,253 @@
+---
+title: "11_Noah"
+author: '38880242'
+date: "2025-06-16"
+output: html_document
+---
+
+#############
+### SETUP ###
+#############
+
+# install.packages(c("ggplot2", "tidyverse"))
+library(ggplot2)
+library(tidyverse)
+
+# set seed
+set.seed(11)
+
+#######################
+### NBA FREE THROWS ###
+#######################
+
+# load data
+
+```{r}
+
+nba <- read_delim("../data/11_nba-free-throws.csv", delim=";")
+
+player_stats <- nba %>%
+  group_by(Player) %>%
+  summarize(
+    k = sum(FT),
+    n = sum(FTA),
+    .groups = "drop"
+  )
+
+alpha_vals <- c(0.5, 1, 2, 5, 10)
+beta_vals  <- c(0.5, 1, 2, 5, 10)
+grid_ab <- expand.grid(alpha = alpha_vals,
+                       beta  = beta_vals)
+
+credible_per_player <- crossing(player_stats, grid_ab) %>%
+  mutate(
+    post_lower = qbeta(0.025, alpha + k, beta  + n - k),
+    post_upper = qbeta(0.975, alpha + k, beta  + n - k)
+  )
+
+
+
+```
+```{r}
+set.seed(8)
+
+nba_players <- read_delim("../data/08_nba-free-throws.csv", delim = ";") %>%
+  mutate(
+    FT  = `FT`  * G,    
+    FTA = `FTA` * G
+  ) %>% 
+  group_by(Player) %>%
+  summarize(
+    G_total = sum(G,   na.rm = TRUE),
+    FT      = sum(FT,  na.rm = TRUE),
+    FTA     = sum(FTA, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(FTA > 25) %>%
+  mutate(
+    FT_pct     = FT / FTA
+  )
+
+z <- qnorm(0.975)
+nbadata_ci <- nba_players %>%
+  mutate(
+    se_wald = sqrt(FT_pct * (1 - FT_pct) / FTA),
+    wald_lo = FT_pct - z * se_wald,
+    wald_hi = FT_pct + z * se_wald,
+    
+    p_ac   = (FT + 2) / (FTA + 4),
+    se_ac  = sqrt(p_ac * (1 - p_ac) / (FTA + 4)),
+    ac_lo  = p_ac - z * se_ac,
+    ac_hi  = p_ac + z * se_ac
+  )
+
+B <- 10000
+sample_df <- nbadata_ci %>% slice_sample(n = 20) %>%
+  rowwise() %>%
+  mutate(
+    boot_props = list(
+      rbinom(B, size = round(FTA), prob = FT_pct) / round(FTA)
+    ),
+    boot_lo = quantile(boot_props[[1]], 0.025),
+    boot_hi = quantile(boot_props[[2]], 0.975)
+  ) %>%
+  ungroup()
+
+
+ggplot(sample_df, aes(x = FT_pct, y = reorder(Player, FT_pct))) +
+  geom_point(size = 2) +
+  geom_errorbarh(aes(xmin = wald_lo, xmax = wald_hi),
+                 color = "blue", height = 0.2) +
+  geom_errorbarh(aes(xmin = ac_lo,   xmax = ac_hi),
+                 color = "red",  height = 0.2) +
+  geom_errorbarh(aes(xmin = boot_lo, xmax = boot_hi),
+                 color = "green", height = 0.2) +
+  labs(
+    title = "Wald (blue), Agresti–Coull (red), Bootstrap (green)",
+    x     = "Season Free-Throw %",
+    y     = NULL
+  ) +
+  theme_minimal()
+```
+
+```{r}
+set.seed(8)
+
+# 0. Load required libraries
+library(readr)
+library(dplyr)
+library(ggplot2)
+
+# 1. Load & aggregate season data
+nba_players <- read_delim("../data/08_nba-free-throws.csv", delim = ";") %>%
+  mutate(
+    FT  = `FT`  * G,   
+    FTA = `FTA` * G
+  ) %>%
+  group_by(Player) %>%
+  summarize(
+    G_total = sum(G,   na.rm = TRUE),
+    FT      = sum(FT,  na.rm = TRUE),
+    FTA     = sum(FTA, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(FTA > 25) %>%
+  mutate(
+    FT_pct = FT / FTA
+  )
+
+z <- qnorm(0.975)
+nbadata_ci <- nba_players %>%
+  mutate(
+    # Wald
+    se_wald = sqrt(FT_pct * (1 - FT_pct) / FTA),
+    wald_lo = FT_pct - z * se_wald,
+    wald_hi = FT_pct + z * se_wald,
+
+    p_ac   = (FT + 2) / (FTA + 4),
+    se_ac  = sqrt(p_ac * (1 - p_ac) / (FTA + 4)),
+    ac_lo  = p_ac - z * se_ac,
+    ac_hi  = p_ac + z * se_ac
+  )
+
+B <- 10000
+sample_df <- nbadata_ci %>%
+  slice_sample(n = 20) %>%
+  rowwise() %>%
+  mutate(
+    boot_draws = list(rbinom(B, size = round(FTA), prob = FT_pct) / round(FTA)),
+    boot_lo    = quantile(boot_draws[[1]], 0.025, na.rm = TRUE),
+    boot_hi    = quantile(boot_draws[[2]], 0.975, na.rm = TRUE),
+
+    cred_lo = qbeta(0.025, 0.5 + FT,  0.5 + FTA - FT),
+    cred_hi = qbeta(0.975, 0.5 + FT,  0.5 + FTA - FT)
+  ) %>%
+  ungroup()
+ggplot(sample_df, aes(x = FT_pct, y = reorder(Player, FT_pct))) +
+  geom_point(size = 2) +
+  geom_errorbarh(aes(xmin = wald_lo,   xmax = wald_hi),   color = "blue",   height = 0.2) +
+  geom_errorbarh(aes(xmin = ac_lo,     xmax = ac_hi),     color = "red",    height = 0.2) +
+  geom_errorbarh(aes(xmin = boot_lo,   xmax = boot_hi),   color = "green",  height = 0.2) +
+  geom_errorbarh(aes(xmin = cred_lo,   xmax = cred_hi),   color = "purple", height = 0.2) +
+  labs(
+    title = "Season Free-Throw % CIs: Wald (blue), Agresti–Coull (red), Bootstrap (green), Jeffreys (purple)",
+    x     = "Free-Throw Percentage",
+    y     = NULL
+  ) +
+  theme_minimal()
+
+```
+
+
+```{r}
+set.seed(11)
+
+nba_players <- read_delim("../data/08_nba-free-throws.csv", delim = ";") %>%
+  mutate(
+    FT  = `FT`  * G,
+    FTA = `FTA` * G
+  ) %>%
+  group_by(Player) %>%
+  summarize(
+    G_total = sum(G,   na.rm = TRUE),
+    FT      = sum(FT,  na.rm = TRUE),
+    FTA     = sum(FTA, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(FTA > 25) %>%
+  mutate(
+    FT_pct = FT / FTA
+  )
+
+# 2. Compute Wald & Agresti–Coull CIs
+z <- qnorm(0.975)
+nbadata_ci <- nba_players %>%
+  mutate(
+    # Wald
+    se_wald = sqrt(FT_pct * (1 - FT_pct) / FTA),
+    wald_lo = FT_pct - z * se_wald,
+    wald_hi = FT_pct + z * se_wald,
+
+    # Agresti–Coull
+    p_ac  = (FT + 2) / (FTA + 4),
+    se_ac = sqrt(p_ac * (1 - p_ac) / (FTA + 4)),
+    ac_lo = p_ac - z * se_ac,
+    ac_hi = p_ac + z * se_ac
+  )
+
+alpha <- 2
+beta  <- 2
+
+B <- 10000
+sample_df <- nbadata_ci %>%
+  slice_sample(n = 20) %>%
+  rowwise() %>%
+  mutate(
+    boot_draws = list(rbinom(B, size = round(FTA), prob = FT_pct) / round(FTA)),
+    boot_lo    = quantile(boot_draws[[1]], 0.025, na.rm = TRUE),
+    boot_hi    = quantile(boot_draws[[2]], 0.975, na.rm = TRUE),
+
+    cred_lo = qbeta(0.025, alpha + FT, beta  + FTA - FT),
+    cred_hi = qbeta(0.975, alpha + FT, beta  + FTA - FT)
+  ) %>%
+  ungroup()
+
+ggplot(sample_df, aes(x = FT_pct, y = reorder(Player, FT_pct))) +
+  geom_point(size = 2) +
+  geom_errorbarh(aes(xmin = wald_lo, xmax = wald_hi),
+                 color = "blue",   height = 0.2) +
+  geom_errorbarh(aes(xmin = ac_lo,   xmax = ac_hi),
+                 color = "red",    height = 0.2) +
+  geom_errorbarh(aes(xmin = boot_lo, xmax = boot_hi),
+                 color = "green",  height = 0.2) +
+  geom_errorbarh(aes(xmin = cred_lo, xmax = cred_hi),
+                 color = "purple", height = 0.2) +
+  labs(
+    title = "Season Free-Throw % CIs:\nWald (blue), Agresti–Coull (red), Bootstrap (green), Beta(2,2) prior (purple)",
+    x     = "Free-Throw Percentage",
+    y     = NULL
+  ) +
+  theme_minimal()
+
+```
+
