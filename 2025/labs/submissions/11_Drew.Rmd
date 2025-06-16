@@ -1,0 +1,100 @@
+#############
+### SETUP ###
+#############
+
+# install.packages(c("ggplot2", "tidyverse"))
+library(ggplot2)
+library(tidyverse)
+
+# set seed
+set.seed(11)
+
+#######################
+### NBA FREE THROWS ###
+#######################
+
+# Step 0: Load and preprocess data
+nba_players <- read_delim("../data/11_nba-free-throws.csv", delim = ";") %>%
+  mutate(
+    TFTM_Team = round(G * FT),
+    TFTA_Team = round(G * FTA)
+  ) %>%
+  group_by(Player) %>%
+  summarise(
+    TFTM = sum(TFTM_Team, na.rm = TRUE),
+    TFTA = sum(TFTA_Team, na.rm = TRUE)
+  ) %>%
+  filter(TFTA >= 25) %>%
+  mutate(
+    FT_Percentage = TFTM / TFTA,
+    Player = as.factor(Player)
+  )
+
+# extract total makes and attempts across all filtered players
+W <- sum(nba_players$TFTM)
+L <- sum(nba_players$TFTA) - W
+n <- W + L
+p_hat <- W / n
+
+###############################
+### PRIOR GRID (no expand.grid) ###
+###############################
+
+# Step 1: define a sequence of prior hyperparameters
+alpha_values <- seq(1, 100, length.out = 100)  # reduced to 100 for speed
+beta_values  <- seq(1, 100, length.out = 100)  # same here
+
+# pre-allocate storage
+N <- length(alpha_values) * length(beta_values)
+post_CI <- tibble(
+  alpha = numeric(N),
+  beta  = numeric(N),
+  width = numeric(N)
+)
+
+# Step 2: compute 95% posterior credible‐interval width for each (α,β)
+idx <- 1
+for(a in alpha_values) {
+  for(b in beta_values) {
+    lo <- qbeta(0.025, a + W, b + L)
+    hi <- qbeta(0.975, a + W, b + L)
+    post_CI[idx, ] <- list(a, b, hi - lo)
+    idx <- idx + 1
+  }
+}
+
+############################
+### CLASSICAL INTERVALS ###
+###########################
+
+# Step 3A: Wald interval
+se_wald <- sqrt(p_hat * (1 - p_hat) / n)
+WCI_Lower = nba_players$FT_Percentage - 1.96 * se_wald
+WCI_Upper = nba_players$FT_Percentage + 1.96 * se_wald
+wald_width <- WCI_Upper - WCI_Lower
+# Step 3B: Agresti–Coull interval
+p_tilde    <- (W + 2) / (n + 4)
+se_tilde   <- sqrt(p_tilde * (1 - p_tilde) / (n + 4))
+CI_Lower_T = (p_tilde - 1.96) * se_tilde
+CI_Upper_T = (p_tilde + 1.96) * se_tilde
+agresti_width <- CI_Upper_T - CI_Lower_T
+
+
+
+# Step 3C: Bootstrap percentile interval
+B <- 5000
+x <- c(rep(1, W), rep(0, L))
+boot_p <- numeric(B)
+for(i in seq_len(B)) {
+  boot_p[i] <- mean(sample(x, n, replace = TRUE))
+}
+boot_width <- diff(quantile(boot_p, c(0.025, 0.975)))
+
+
+
+
+###############################
+### VISUALIZATION ###
+###############################
+
+#plot boot_width, wald_width, agresti_width, PI_CIwidth against alpha and beta
