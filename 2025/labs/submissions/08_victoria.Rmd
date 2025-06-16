@@ -283,3 +283,62 @@ ggplot(coverage_long, aes(x = p, y = coverage, color = as.factor(n))) +
   theme_minimal()
 ```
 The coverage of the boostrapped interval looks similar to the wald coverage at 10 but more similar to the agresti coull at 100 and 500. We can assume that the coverage is approximately between wald and agresti coull in terms of robustness to n and p.
+
+
+Lab 11.1.4 
+
+Simulate different alpha and beta values, compare to previously characterized confidence intervals
+
+```{r}
+#different values 
+a = seq(2, 10, length.out = 20)
+b = seq(2, 10, length.out = 20)
+beta_grid = expand.grid(a = a, b = b)
+
+posterior_df <- crossing(nba_summary, beta_grid) %>%
+  mutate(
+    posterior_lower = qbeta(0.025, tot_FTM.x + a, tot_FTA.x - tot_FTM.x + b),
+    posterior_upper = qbeta(0.975, tot_FTM.x + a, tot_FTA.x - tot_FTM.x + b),
+    width_cred = posterior_upper - posterior_lower
+  )
+
+head(posterior_df)
+ggplot(posterior_df, aes(x = width_cred, y = FT_percent.x)) +
+  geom_point(aes(color = as.factor(a), shape = as.factor(b)), alpha = 0.6) +
+  labs(
+    title = "Posterior Credible Interval Width vs. Free Throw Percentage",
+    x = "Width of Credible Interval",
+    y = "Free Throw Percentage",
+    color = "Alpha (a)",
+    shape = "Beta (b)"
+  ) +
+  theme_minimal() +
+  scale_color_brewer(palette = "PiYg") +
+  scale_shape_manual(values = 1:20) +
+  theme(legend.position = "none")
+```
+
+Compare widths of all the intervals on a plot 
+
+```{r}
+ggplot(posterior_df, aes(x = FT_percent.x)) +
+  geom_point(aes(y = wald_lower, color = "Wald Lower"), alpha = 0.3) +
+  geom_point(aes(y = wald_upper, color = "Wald Upper"), alpha = 0.3) +
+  geom_point(aes(y = ac_lower, color = "Agresti-Coull Lower"), alpha = 0.3) +
+  geom_point(aes(y = ac_upper, color = "Agresti-Coull Upper"), alpha = 0.3) +
+  geom_point(aes(y = boot_lower, color = "Bootstrap Lower"), alpha = 0.3) +
+  geom_point(aes(y = boot_upper, color = "Bootstrap Upper"), alpha = 0.3) +
+  geom_point(aes(y = posterior_lower, color = "Posterior Lower"), alpha = 0.3) +
+  geom_point(aes(y = posterior_upper, color = "Posterior Upper"), alpha = 0.3) +
+  labs(
+    title = "Comparison of Confidence and Credible Intervals",
+    x = "Free Throw Percentage",
+    y = "Interval Bounds",
+    color = "Interval Type"
+  ) +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set1") +
+  theme(legend.position = "bottom")
+```
+
+
