@@ -1,0 +1,163 @@
+---
+title: "11_Maximilian"
+author: "Maximilian J. Gebauer"
+date: "2025-06-16"
+output: html_document
+---
+
+```{r Setup, include=FALSE, results='hide', warning=FALSE}
+knitr::opts_chunk$set(echo = T, fig.width=8, fig.height=4)
+options(scipen = 0, digits = 3)  # controls base R output
+
+# Package setup
+if(!require("pacman")) install.packages("pacman")
+
+pacman::p_load(tidyverse, dplyr, ggthemes, data.table, lubridate, glmnet,
+               GGally, RColorBrewer, ggsci, plotROC, usmap,
+               plotly, ggpubr, vistime, coefplot, skimr, car, ggrepel, slider, lubridate,
+               tidymodels,ranger,vip,ggplot2, tune,dials,pdp, purrr, stringr, lmtest,
+               sandwich)
+```
+
+
+```{r}
+nba_players <- read.csv("/Users/maximiliangebauer/Documents/summer-lab/2025/labs/submissions/nba_ft.csv")
+```
+
+```{r}
+set.seed(8)
+agg_data <- nba_players %>%
+  group_by(Player) %>%
+  mutate(
+    Total_FTA = round(sum(FTA * G), digits=0),
+    Total_FTM = round(sum(FT * G), digits=0),
+    FT_percent = Total_FTM / Total_FTA * 100
+  ) %>%
+  filter(Total_FTA > 24) %>%
+  select(Player, Total_FTA, Total_FTM, FT_percent) %>%
+  unique() %>%
+  arrange(Total_FTA) %>%
+  ungroup()
+
+agg_data$Player <- as.factor(agg_data$Player)
+
+agg_data_sub <- agg_data %>% 
+  slice_sample(n=6)
+```
+
+```{r}
+alpha <- seq(1,10,by=1)
+beta <- seq(1,10,by=1)
+```
+
+
+```{r}
+
+set.seed(42)
+
+# 1) Compute classical & bootstrap intervals
+results_boot <- agg_data_sub %>%
+  mutate(
+    p          = Total_FTM / Total_FTA,
+    p_ac       = (Total_FTM + 2) / (Total_FTA + 2),
+    wald_lower = p - sqrt((p*(1-p)) / Total_FTA),
+    wald_upper = p + sqrt((p*(1-p)) / Total_FTA),
+    ag_lower   = p_ac - sqrt((p_ac*(1-p_ac)) / Total_FTA),
+    ag_upper   = p_ac + sqrt((p_ac*(1-p_ac)) / Total_FTA)
+  ) %>%
+  # bootstrap 1 000 sim’s per row
+  mutate(
+    boot_vals  = map(p, ~ rbinom(1000, size = first(Total_FTA), prob = .x) / first(Total_FTA)),
+    boot_lower = map_dbl(boot_vals, ~ quantile(.x, 0.025)),
+    boot_upper = map_dbl(boot_vals, ~ quantile(.x, 0.975))
+  ) %>%
+  select(-boot_vals)
+
+classical_long <- results_boot %>%
+  select(Player, wald_lower, wald_upper, ag_lower, ag_upper, boot_lower, boot_upper) %>%
+  pivot_longer(
+    cols      = -Player,
+    names_to  = c("method", "bound"),
+    names_sep = "_"
+  ) %>%
+  pivot_wider(names_from = bound, values_from = value) 
+
+# 3) Bayesian intervals (as before)
+results2 <- results_boot %>%
+  mutate(
+    successes = Total_FTM,
+    failures  = Total_FTA - Total_FTM
+  )
+
+bayes_intervals <- results2 %>%
+  crossing(params) %>%
+  mutate(
+    lower = qbeta(0.025, alpha + successes, beta + failures),
+    upper = qbeta(0.975, alpha + successes, beta + failures)
+  )
+
+library(ggplot2)
+
+ggplot() +
+  # 1) Bayesian “cloud” (100 priors per player), jitter x only
+  geom_errorbar(
+    data     = bayes_intervals,
+    aes(
+      x      = Player,
+      y      = (lower + upper) / 2,       # dummy y for jitter
+      ymin   = lower,
+      ymax   = upper,
+      group  = interaction(alpha, beta)
+    ),
+    width    = 0.05,
+    alpha    = 0.1,
+    color    = "grey30",
+    position = position_jitter(width = 0.2, height = 0)
+  ) +
+  
+  # 2) Wald (blue), nudged left
+  geom_errorbar(
+    data     = results_boot,
+    aes(x = Player, ymin = wald_lower, ymax = wald_upper),
+    width    = 0.2,
+    size     = 1,
+    color    = "steelblue",
+    position = position_nudge(x = -0.25)
+  ) +
+  
+  # 3) Agresti–Coull (red), centered
+  geom_errorbar(
+    data     = results_boot,
+    aes(x = Player, ymin = ag_lower, ymax = ag_upper),
+    width    = 0.2,
+    size     = 1,
+    color    = "firebrick",
+    position = position_nudge(x = 0)
+  ) +
+  
+  # 4) Bootstrap (green), nudged right
+  geom_errorbar(
+    data     = results_boot,
+    aes(x = Player, ymin = boot_lower, ymax = boot_upper),
+    width    = 0.2,
+    size     = 1,
+    color    = "darkgreen",
+    position = position_nudge(x = 0.25)
+  ) +
+  
+  coord_flip() +
+  labs(
+    title   = "Free-Throw Rate Intervals by Player",
+    x       = NULL,
+    y       = "Estimated Rate",
+    caption = paste(
+      "Grey cloud =", "Bayesian (100 priors);",
+      "Blue =", "Wald;",
+      "Red =", "Agresti–Coull;",
+      "Green =", "Bootstrap"
+    )
+  ) +
+  theme_minimal()
+```
+
+
