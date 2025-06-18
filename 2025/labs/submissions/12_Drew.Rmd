@@ -1,0 +1,264 @@
+```{r}
+#############
+### SETUP ###
+#############
+
+# install.packages(c("ggplot2", "splines", "tidyverse"))
+library(ggplot2)
+library(splines)
+library(tidyverse)
+library(dplyr)
+# set seed
+set.seed(12)
+
+##########################
+### NBA PLAYER QUALITY ###
+##########################
+
+# load data
+nba_data = read_csv("../data/12_nba-box-scores.csv")
+
+nba_data <- nba_data %>%
+  filter(possessions != 0)
+nba_data <- nba_data %>%
+mutate(ppp = pts / possessions)
+
+# Filter players with enough games
+G_star <- 10
+player_game_counts <- nba_data %>% count(idPlayer, name = "num_games")
+nba_data <- nba_data %>% left_join(player_game_counts, by = "idPlayer") %>%
+  filter(num_games >= G_star)
+########################################################
+### TASK 3: Estimate mu and nu^2 (population mean and prior variance)
+########################################################
+M <- nba_data %>%
+  group_by(idPlayer) %>%
+  summarise(player_avg_ppp = mean(ppp)) %>%
+  pull(player_avg_ppp)
+
+mu_hat <- mean(M)
+nu2_hat <- var(M)
+
+########################################################
+### TASK 4: Estimate sigma^2 (variance for average players)
+########################################################
+sd_M <- sd(M)
+
+avg_players <- nba_data %>%
+  group_by(idPlayer) %>%
+  summarise(player_avg_ppp = mean(ppp)) %>%
+  filter(abs(player_avg_ppp - mu_hat) < sd_M) %>%
+  pull(idPlayer)
+
+V <- nba_data %>%
+  filter(idPlayer %in% avg_players) %>%
+  group_by(idPlayer) %>%
+  summarise(var_ppp = var(ppp)) %>%
+  pull(var_ppp)
+
+sigma2_hat <- mean(V)
+
+########################################################
+### TASK 5: Tune tau^2 via cross-validation (grid search with RMSE)
+########################################################
+
+tau2_grid <- 10^seq(-7, -3, length.out = 10)
+players_to_use <- nba_data %>%
+  group_by(idPlayer) %>%
+  filter(n() >= 6) %>%
+  pull(idPlayer) %>% unique()
+
+rmse_by_tau <- numeric(length(tau2_grid))
+
+for (t in seq_along(tau2_grid)) {
+  tau2 <- tau2_grid[t]
+  rmses <- c()
+
+  for (player in players_to_use) {
+    player_games <- nba_data %>%
+      filter(idPlayer == player) %>%
+      arrange(dateGame)
+
+    n <- nrow(player_games)
+    mid <- floor(n / 2)
+
+    # Forward filter (only up to mid)
+    mu_prev <- (player_games$ppp[1] * player_games$possessions[1] / sigma2_hat + mu_hat / nu2_hat) /
+      (player_games$possessions[1] / sigma2_hat + 1 / nu2_hat)
+
+    for (j in 2:mid) {
+      xj <- player_games$ppp[j]
+      pj <- player_games$possessions[j]
+      mu_j <- (pj * xj / sigma2_hat + mu_prev / tau2) / (pj / sigma2_hat + 1 / tau2)
+      mu_prev <- mu_j
+    }
+
+    # RMSE over remaining half
+    heldout <- player_games[(mid + 1):n, ]
+    rmse <- sqrt(mean((heldout$ppp - mu_prev)^2))
+    rmses <- c(rmses, rmse)
+  }
+
+  rmse_by_tau[t] <- mean(rmses)
+}
+
+# Optimal tau^2
+tau2_hat <- tau2_grid[which.min(rmse_by_tau)]
+
+########################################################
+### TASK 6: Estimate posterior means mu_ij and plot
+########################################################
+
+# For one example player
+example_ids <- nba_data %>%
+  count(idPlayer, sort = TRUE) %>%
+  slice(1:3) %>%
+  pull(idPlayer)
+
+posterior_estimates <- list()
+
+for (player in example_ids) {
+  df <- nba_data %>%
+    filter(idPlayer == player) %>%
+    arrange(dateGame)
+
+  mu_list <- c()
+
+  # First game
+  x1 <- df$ppp[1]
+  p1 <- df$possessions[1]
+  mu_prev <- (p1 * x1 / sigma2_hat + mu_hat / nu2_hat) / (p1 / sigma2_hat + 1 / nu2_hat)
+  mu_list <- c(mu_list, mu_prev)
+
+  for (j in 2:nrow(df)) {
+    xj <- df$ppp[j]
+    pj <- df$possessions[j]
+    mu_j <- (pj * xj / sigma2_hat + mu_prev / tau2_hat) / (pj / sigma2_hat + 1 / tau2_hat)
+    mu_list <- c(mu_list, mu_j)
+    mu_prev <- mu_j
+  }
+
+  df$mu_hat <- mu_list
+  posterior_estimates[[as.character(player)]] <- df
+}
+
+# Combine all player estimates
+posterior_df <- posterior_df %>%
+  group_by(idPlayer) %>%
+  mutate(game_index = row_number()) %>%
+  ungroup()
+# Plot
+ggplot(posterior_df, aes(x = game_index, y = mu_hat, color = as.factor(idPlayer))) +
+  geom_line() +
+  labs(
+    title = "Posterior Estimate of Scoring Quality Over Career",
+    x = "Game Number",
+    y = "Estimated Scoring Quality (mu_hat)",
+    color = "Player ID"
+  ) +
+  theme_minimal()
+  
+```
+
+
+
+
+Football quality
+```{r}
+# install.packages(c("ggplot2", "splines", "tidyverse"))
+library(ggplot2)
+library(splines)
+library(tidyverse)
+
+# set seed
+set.seed(12)
+##########################
+### NFL KICKER QUALITY ###
+##########################
+
+# load data
+fg_data = read_csv("../data/12_field-goals.csv")
+
+############################################
+### TASK 1: Fit logistic model for P(FG) ###
+############################################
+
+# Logistic regression using spline on yard line (ydl)
+model_fg <- glm(fg_made ~ bs(ydl, df = 5), data = fg_data, family = "binomial")
+# Predict probabilities from model
+predicted_probs <- predict(model_fg, newdata = fg_data, type = "response")
+fg_data <- fg_data %>%
+  mutate(predicted_prob = predict(model_fg, newdata = fg_data, type = "response"))
+
+#########################################
+### TASK 2: Compute FGPA and formula ###
+#########################################
+
+# FGPA = actual - expected
+fg_data <- fg_data %>%
+  mutate(FGPA = fg_made - predicted_prob)
+
+############################################
+### TASK 3: Recursive estimation of KQ ###
+############################################
+fg_data <- fg_data %>%
+  arrange(kicker, ydl) %>%  # assuming chronological order by ydl or you can use date if available
+  group_by(kicker) %>%
+  mutate(kick_num = row_number()) %>%
+  ungroup()
+
+# Step 4: Recursive function to compute Kicker Quality (KQ)
+compute_kicker_quality <- function(data, alpha) {
+  data <- data %>%
+    arrange(kicker, kick_num) %>%
+    group_by(kicker) %>%
+    mutate(KQ = {
+      kq <- numeric(n())
+      for (j in 2:n()) {
+        kq[j] <- alpha * kq[j - 1] + FGPA[j - 1]
+      }
+      kq
+    }) %>%
+    ungroup()
+  return(data)
+}
+compute_kicker_quality <- function(data, alpha) {
+  data <- data %>%
+    arrange(kicker, kick_num) %>%
+    group_by(kicker) %>%
+    mutate(KQ = {
+      kq <- numeric(n())
+      if (n() >= 2) {
+        for (j in 2:n()) {
+          kq[j] <- alpha * kq[j - 1] + FGPA[j - 1]
+        }
+      }
+      kq  # will be all zeros if only one kick
+    }) %>%
+    ungroup()
+  return(data)
+}
+# Step 5: Compute KQ with alpha = 0.98
+alpha_value <- 0.98
+fg_with_kq <- compute_kicker_quality(fg_data, alpha_value)
+
+# Step 6: Plot quality trajectory for top 3 kickers
+top_kickers <- fg_with_kq %>%
+  count(kicker, sort = TRUE) %>%
+  slice(1:3) %>%
+  pull(kicker)
+
+# Plot
+fg_with_kq %>%
+  filter(kicker %in% top_kickers) %>%
+  ggplot(aes(x = kick_num, y = KQ, color = as.factor(kicker))) +
+  geom_line(size = 1) +
+  labs(
+    title = paste("Kicker Quality Over Time (α =", alpha_value, ")"),
+    x = "Kick Number in Career",
+    y = "Kicker Quality (KQᵢⱼ)",
+    color = "Kicker ID"
+  ) +
+  theme_minimal()
+```
+
