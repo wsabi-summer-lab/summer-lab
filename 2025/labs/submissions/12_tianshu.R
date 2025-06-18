@@ -84,25 +84,22 @@ nba_data_posterior <- nba_data %>%
   group_modify(~ {
     n <- nrow(.x)
     mu_prev <- mu
-    var_prev <- tau_2
+    var_prev <- nu_2  # ← use nu^2 for game 1
     mu_post_vec <- numeric(n)
     var_post_vec <- numeric(n)
     
     for (j in 1:n) {
       x_obs <- .x$pts[j] / .x$possessions[j]
       
-      # Posterior variance
       post_var <- 1 / (1 / var_prev + 1 / sigma_2)
-      
-      # Posterior mean
       post_mean <- post_var * (x_obs / sigma_2 + mu_prev / var_prev)
       
       mu_post_vec[j] <- post_mean
       var_post_vec[j] <- post_var
       
-      # Update prior for next game
+      # Update prior for next game using τ^2
       mu_prev <- post_mean
-      var_prev <- post_var + nu_2
+      var_prev <- post_var + tau_2
     }
     
     .x$mu_post <- mu_post_vec
