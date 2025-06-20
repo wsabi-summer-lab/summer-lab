@@ -1,0 +1,192 @@
+---
+title: "12_adam"
+output: pdf_document
+date: "2025-06-18"
+---
+
+```{r setup, include=FALSE}
+#############
+### SETUP ###
+#############
+
+# install.packages(c("ggplot2", "splines", "tidyverse"))
+library(ggplot2)
+library(splines)
+library(tidyverse)
+library(tidyr)
+
+# set seed
+set.seed(12)
+
+##########################
+### NBA PLAYER QUALITY ###
+##########################
+
+# load data
+nba_data = read_csv("../data/12_nba-box-scores.csv")
+# preview data
+head(nba_data)
+
+G_star = 30
+avg = nba_data %>%
+  mutate(ppp = pts/possessions) %>% 
+  group_by(namePlayer) %>%
+  filter(n() >= G_star) %>% 
+  summarise(
+    m = mean(ppp, na.rm = TRUE),
+    v = var(ppp, na.rm = TRUE), .groups  = "drop"
+  ) 
+  
+
+vset = avg %>% 
+ filter(m > u - 0.01 & m < u + 0.01)
+sigma2_hat = mean(vset$v, na.rm = TRUE)
+
+mu = mean(avg$m)
+nu2 = var(avg$m)
+
+
+split = nba_data %>%
+ group_by(namePlayer) %>%
+  filter(n() >= G_star) %>%
+  arrange(dateGame) %>%
+  mutate(
+    idx = row_number(),
+    G_i = n(),
+    half = floor(G_i/2),
+    which = ifelse(idx <= half, "first_half", "second_half")
+  ) %>% 
+  summarise(
+    m_ik = mean(pts[which == "first_half"]/possessions[which == "first_half"], na.rm = TRUE),
+    d2_i = list(pts[which == "second_half"]/possessions[which == "second_half"]),
+    k_i = first(half),
+    .groups = "drop"
+    )
+
+tau2_grid = 10^seq(-7,-3, length.out = 10)
+
+# Compute RMSE for each tau²
+rmse_results <- sapply(tau2_grid, function(tau2) {
+  per_player_rmse <- mapply(function(m_ik, d2_i, k_i) {
+    mu_ik <- (sigma2_hat / (sigma2_hat + k_i * tau2)) * mu_hat +
+             (k_i * tau2 / (sigma2_hat + k_i * tau2)) * m_ik
+    sqrt(mean((mu_ik - unlist(d2_i))^2, na.rm = TRUE))
+  },
+  m_ik = split$m_ik,
+  d2_i = split$d2_i,
+  k_i  = split$k_i,
+  SIMPLIFY = TRUE)
+  
+  mean(per_player_rmse, na.rm = TRUE)
+})
+
+# Store results
+tau2_results <- tibble(
+  tau2 = tau2_grid,
+  mean_RMSE = rmse_results
+)
+
+# Identify best tau²
+best_tau2 <- tau2_results %>%
+  filter(mean_RMSE == min(mean_RMSE))
+
+best_tau2
+tau2 = 0.001
+
+compute_mu_hat <- function(pts, possessions, mu, sigma2_hat, tau2, nu2) {
+  n_games <- length(pts)
+  mu_hat <- numeric(n_games)
+
+  # first game
+  mu_hat[1] <- ((pts[1]/(sigma2_hat*possessions[1])) + (mu/nu2))/((1/(sigma2_hat*possessions[1])) + (1/nu2))
+  # more games
+  if (n_games > 1) {
+    for (j in 2:n_games) {
+    mu_hat[j] <- ((pts[j]/(sigma2_hat*possessions[j])) +   (mu_hat[j-1]/tau2))/((1/(sigma2_hat*possessions[j])) + (1/tau2))
+  }
+  }
+  
+
+  return(mu_hat)
+}
+
+
+
+nba_posteriors <- nba_data %>%
+  filter(possessions > 0, !is.na(pts), !is.na(namePlayer)) %>% 
+  group_by(namePlayer) %>%
+  arrange(dateGame, .by_group = TRUE) %>%
+  mutate(game_number = row_number(),
+         mu_hat_vals = compute_mu_hat(pts, possessions, mu, sigma2_hat, tau2, nu2)) %>% 
+  ungroup()
+
+
+```
+
+
+
+```{r cars}
+# load data
+kick_data = read_csv("data/12_field-goals.csv")
+# preview data
+head(kick_data)
+
+
+model = glm(fg_made ~ splines::bs(ydl, df = 5, degree = 3), data = kick_data, family = binomial(link = "logit"))
+
+
+compute_kicker_quality <- function(data, alpha, model) {
+  data <- data %>%
+    arrange(kicker, week) %>%  # sort by kicker and time
+    mutate(
+      pred_prob = predict(model, newdata = data, type = "response"),
+      fgpa = as.numeric(fg_made) - pred_prob,
+      kq = NA_real_
+    )
+  
+  # Loop through each kicker
+  kicker <- unique(data$kicker)
+  
+  for (id in kicker) {
+    idx <- which(data$kicker == id)
+    n <- length(idx)
+    
+    if (n < 2) next  # need at least 2 kicks to compute quality
+    
+    data$kq[idx[1]] <- 0  # KQ_0 = 0
+    for (j in 2:n) {
+      prev <- data$kq[idx[j - 1]]
+      fgpa_prev <- data$fgpa[idx[j - 1]]
+      data$kq[idx[j]] <- alpha * prev + fgpa_prev
+    }
+  }
+  
+  return(data)
+}
+
+model <- glm(fg_made ~ splines::bs(ydl, df = 5, degree = 3), 
+             data = kick_data, family = binomial)
+
+kick_data_with_kq <- compute_kicker_quality(kick_data, alpha = 0.9, model)
+
+sample_kickers <- kick_data_with_kq %>%
+  filter(!is.na(kq)) %>%
+  group_by(kicker) %>%
+  filter(n() > 10) %>%
+  slice_head(n = 50) %>%
+  ungroup() %>%
+  distinct(kicker) %>%
+  slice_sample(n = 4) %>%
+  pull(kicker)
+
+kick_data_with_kq %>%
+  filter(kicker %in% sample_kickers) %>%
+  group_by(kicker) %>%
+  mutate(kick_number = row_number()) %>%
+  ggplot(aes(x = kick_number, y = kq, color = kicker)) +
+  geom_line() +
+  labs(title = "Kicker Quality Over Time", x = "Kick #", y = "Kicker Quality (KQ)")
+
+
+```
+
