@@ -1,0 +1,215 @@
+---
+title: "14 Lab Max"
+author: "Maximilian J. Gebauer"
+date: "2025-06-20"
+output: html_document
+---
+
+```{r Setup, include=FALSE, results='hide', warning=FALSE}
+knitr::opts_chunk$set(echo = T, fig.width=8, fig.height=4)
+options(scipen = 0, digits = 3)  # controls base R output
+
+# Package setup
+if(!require("pacman")) install.packages("pacman")
+
+pacman::p_load(tidyverse, dplyr, ggthemes, data.table, lubridate, glmnet,
+               GGally, RColorBrewer, ggsci, plotROC, usmap,
+               plotly, ggpubr, vistime, coefplot, skimr, car, ggrepel, slider, lubridate,
+               tidymodels,ranger,vip,ggplot2, tune,dials,pdp, purrr, stringr, lmtest,
+               sandwich, rstan)
+```
+
+```{r}
+nfl_data <- read_csv("/Users/maximiliangebauer/Documents/summer-lab/2025/labs/data/14_nfl-games.csv")
+```
+```{r}
+head(nfl_data)
+```
+
+```{r}
+nfl_data <- nfl_data %>%
+  mutate(
+    season_s = season - 2017,
+  )
+```
+
+```{r}
+team_levels <- sort(unique(c(nfl_data$home_team, nfl_data$away_team)))
+
+nfl_data <- nfl_data %>% 
+  mutate(
+    home_team_index = match(home_team, team_levels),   #  ATL → 1, BUF → 2, …
+    away_team_index = match(away_team, team_levels)
+  )
+```
+
+```{r}
+sub_nfl <- nfl_data %>%
+  select(pts_H_minus_A,season_s,home_team_index,away_team_index)
+```
+
+```{r}
+stan_data <- list(
+  N_games  = nrow(sub_nfl),
+  Y        = sub_nfl$pts_H_minus_A,
+  N_season = length(unique(sub_nfl$season_s)),
+  H = sub_nfl$home_team_index,
+  A = sub_nfl$away_team_index,
+  S = sub_nfl$season_s,
+  N_teams  = max(c(sub_nfl$home_team_index,
+                   sub_nfl$away_team_index))
+)
+```
+
+```{r}
+"
+data {
+  int<lower=1> N_games;                  
+  vector[N_games] Y;                      
+  int<lower=1> N_teams;                  
+  int<lower=1> N_season;                  
+  int<lower=1,upper=N_teams> H[N_games];  
+  int<lower=1,upper=N_teams> A[N_games];   
+  int<lower=1,upper=N_season> S[N_games];  
+}
+
+parameters {
+  vector[N_teams] theta;                   
+  vector[N_teams] alpha_team_raw;          
+  real alpha;                              
+  real<lower=0> sigma_team;                
+  real<lower=0> sigma_HFA;                
+  real<lower=0> tau_HFA;                  
+  vector[N_season] delta_season;        
+  real<lower=0> sigma;
+}
+
+transformed parameters {
+  vector[N_teams] alpha_team = alpha + alpha_team_raw;
+}
+
+model {
+  sigma              ~ normal(0, 5);
+  sigma_team         ~ normal(0, 5);
+  sigma_HFA          ~ normal(0, 5);
+  tau_HFA            ~ normal(0, 5);
+
+  theta              ~ normal(0,   sigma_team);       
+  alpha_team_raw     ~ normal(0,   sigma_HFA);         
+  alpha              ~ normal(0,   tau_HFA);           
+  delta_season       ~ normal(0,   5);                 
+  for (i in 1:N_games) {
+    real mu =  (theta[H[i]] - theta[A[i]])             
+             + alpha_team[H[i]]                         
+             + delta_season[S[i]];                      
+    Y[i] ~ normal(mu, sigma);
+  }
+}
+
+generated quantities {
+  vector[N_games] y_rep;
+  for (i in 1:N_games) {
+    real mu =  (theta[H[i]] - theta[A[i]])
+             + alpha_team[H[i]]
+             + delta_season[S[i]];
+    y_rep[i] = normal_rng(mu, sigma);
+  }
+}"
+```
+
+```{r}
+model <- stan_model(file = "/Users/maximiliangebauer/Documents/summer-lab/2025/labs/submissions/wsabi.stan")
+```
+
+```{r}
+fit <- sampling(
+  object  = model,
+  data    = stan_data,          
+  chains  = 4,
+  iter    = 8000,                     
+  warmup  = 4000,                      
+  seed    = 321,
+  cores   = min(4, parallel::detectCores()),
+  control = list(
+    adapt_delta   = 0.98,              
+    max_treedepth = 15                
+  ),
+  refresh = 0                         
+)
+```
+
+```{r}
+
+team_lookup <- nfl_data %>%                                # <- has home_team
+  select(team_name = home_team, team_id = home_team_index) %>%
+  distinct(team_id, .keep_all = TRUE)
+
+library(tidybayes)
+library(dplyr)
+library(ggplot2)
+library(forcats)
+
+# 1) posterior draws of alpha_team[j]
+alpha_draws <- gather_draws(fit, alpha_team[team_id])
+
+# 2) summarise by team and bring the names in
+alpha_summary <- alpha_draws %>%
+  left_join(team_lookup, by = "team_id") %>%      # <<— new lookup
+  group_by(team_name) %>%
+  summarise(
+    mean  = mean(.value),
+    lower = quantile(.value, 0.025),
+    upper = quantile(.value, 0.975),
+    .groups = "drop"
+  )
+
+# 3) plot: mean + 95 % CrI, ordered by mean
+ggplot(alpha_summary,
+       aes(x = mean,
+           y = fct_reorder(team_name, mean))) +
+  geom_point(size = 2) +
+  geom_errorbarh(aes(xmin = lower, xmax = upper), height = 0) +
+  geom_vline(xintercept = 0, linetype = "dashed", colour = "grey40") +
+  labs(title = "Team-specific Home-Field Advantage (points)",
+       x     = "Posterior mean and 95% credible interval",
+       y     = NULL) +
+  theme_bw() +
+  theme(panel.grid.minor = element_blank())
+```
+Largest HFA: DAL, Smallest: ARI
+```{r}
+library(tidybayes)
+library(dplyr)
+library(ggplot2)
+library(forcats)
+
+theta_draws <- gather_draws(fit, theta[team_id])   # from tidybayes
+
+theta_summary <- theta_draws %>%
+  left_join(team_lookup, by = "team_id") %>%
+  group_by(team_name) %>%
+  summarise(
+    mean  = mean(.value),
+    lower = quantile(.value, 0.025),   # 2.5 %
+    upper = quantile(.value, 0.975),   # 97.5 %
+    .groups = "drop"
+  )
+
+ggplot(theta_summary,
+       aes(x = mean,
+           y = fct_reorder(team_name, mean))) +
+  geom_point(size = 2) +
+  geom_errorbarh(aes(xmin = lower, xmax = upper), height = 0) +
+  geom_vline(xintercept = 0, linetype = "dashed", colour = "grey40") +
+  labs(title = "Posterior Team Strength (θ)",
+       x     = "Posterior mean and 95% credible interval (points)",
+       y     = NULL) +
+  theme_bw() +
+  theme(panel.grid.minor = element_blank())
+```
+
+Highest TS: KC
+Lowest TS: NYJ
+
+
+
