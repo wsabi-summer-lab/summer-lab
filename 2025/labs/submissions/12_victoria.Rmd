@@ -1,0 +1,274 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+12.1.3 Deriving Posteriror Means
+
+```{r}
+#Write a formula for posterior mean of normal-normal model 
+nba = read.csv('../data/12_nba-box-scores.csv')
+head(nba)
+
+library(ggplot2)
+library(tidyverse)
+
+#define set 
+nba_set <- nba %>%
+  group_by(namePlayer) %>%
+  filter(n() > 30) %>%    # use n() instead of length()
+  ungroup()
+
+nba_average <- nba_set %>%
+  group_by(namePlayer) %>%
+  mutate(
+    meanPoints = mean(pts, na.rm = TRUE),
+    varPoints = var(pts, na.rm = TRUE),
+    g = n()
+  ) %>%
+  ungroup()
+
+
+```
+
+Task 4 - estimate sigma$^2$
+```{r}
+nba_variance <- nba_average %>% 
+  group_by(namePlayer) %>% 
+  mutate(
+    variance = var(pts/possessions)
+  ) %>% 
+  ungroup()
+
+mu_hat <- nba_variance %>%
+  summarize(mean_points = sum(pts) / sum(possessions)) %>%
+  pull(mean_points)
+
+average_players = nba_variance %>% 
+  filter(8 < meanPoints & meanPoints < 12)
+
+sigma2_hat = average_players %>% 
+  summarize(sigma2 = mean(variance, na.rm = TRUE)) %>% 
+  pull(sigma2)
+
+print(sigma2_hat)
+
+```
+
+Task 5: Estimate T$^2$
+
+```{r}
+tau2_grid <- 10^seq(-7, -3, length.out = 10)
+
+# Split each player’s career into two halves
+split_players <- nba_variance %>% 
+  group_by(namePlayer) %>% 
+  arrange(dateGame) %>% 
+  mutate(
+    idx = row_number(),
+    G_i = n(),
+    half = floor(G_i / 2),
+    which = if_else(idx <= half, "first_half", "second_half")
+  ) %>% 
+  summarize(
+    m_ik = mean(pts[which == "first_half"] / possessions[which == "first_half"], na.rm = TRUE),
+    d2_i = list(pts[which == "second_half"] / possessions[which == "second_half"]),
+    k_i = first(half),
+    .groups = "drop"
+  )
+
+# Compute RMSE for each tau²
+rmse_results <- sapply(tau2_grid, function(tau2) {
+  per_player_rmse <- mapply(function(m_ik, d2_i, k_i) {
+    mu_ik <- (sigma2_hat / (sigma2_hat + k_i * tau2)) * mu_hat +
+             (k_i * tau2 / (sigma2_hat + k_i * tau2)) * m_ik
+    sqrt(mean((mu_ik - unlist(d2_i))^2, na.rm = TRUE))
+  },
+  m_ik = split_players$m_ik,
+  d2_i = split_players$d2_i,
+  k_i  = split_players$k_i,
+  SIMPLIFY = TRUE)
+  
+  mean(per_player_rmse, na.rm = TRUE)
+})
+
+# Store results
+tau2_results <- tibble(
+  tau2 = tau2_grid,
+  mean_RMSE = rmse_results
+)
+
+# Identify best tau²
+best_tau2 <- tau2_results %>%
+  filter(mean_RMSE == min(mean_RMSE))
+
+best_tau2
+
+```
+```{r}
+#Visualize 
+ggplot(tau2_results, aes(x = tau2, y = mean_RMSE)) +
+  geom_line() +
+  geom_point() +
+  scale_x_log10() +
+  labs(title = "Empirical Bayes RMSE vs τ²",
+       x = expression(tau^2),
+       y = "Mean RMSE") +
+  theme_minimal()
+```
+Compute posterior means
+```{r}
+
+nba_variance_posterior <- nba_variance %>% 
+  group_by(namePlayer) %>%
+  arrange(dateGame) %>% 
+  mutate(
+    X = pts / possessions,
+    sigma2_hat = sigma2_hat,
+    tau2_hat = best_tau2$tau2
+  ) %>% 
+  ungroup()
+  
+```
+
+Plot 
+```{r}
+nba_posterior <- nba_variance_posterior %>%
+  arrange(namePlayer, dateGame) %>% 
+  group_by(namePlayer) %>% 
+  mutate(
+    ppp = pts/possessions,
+    mu_bij = NA_real_,
+    game_num = row_number()
+    w = 1 / (sigma2_hat + game_num * tau2_hat)
+  
+  ) %>% 
+  group_split()
+  
+for (i in seq_along(nba_posterior)) {
+  player_df <- nba_posterior[[i]]  # use [[i]] not [i]
+  n_games <- nrow(player_df)
+  
+  mu_vec <- numeric(n_games)
+  mu_vec[1] <- mu_hat  # initialize with global prior
+  
+  for (j in 2:n_games) {
+    games <- j - 1
+    X_j <- player_df$X[j]
+    mu_vec[j] <- mu + (.001/(.001+sigma2_hat)) * (ppp - mu_vec[j-1])
+  }
+  
+  nba_posterior[[i]]$mu_bij <- mu_vec
+}
+
+nba_posterior_all <- bind_rows(nba_posterior )
+
+sample_players <- nba_posterior_all %>%
+  distinct(namePlayer) %>%
+  slice_sample(n = 10) %>%
+  pull(namePlayer)
+
+nba_sample_df <- nba_posterior_all %>%
+  filter(namePlayer %in% sample_players)
+
+# Plot
+library(ggplot2)
+nba_sample_df %>%
+  arrange(namePlayer, dateGame) %>%
+  group_by(namePlayer) %>%
+  mutate(game_number = row_number()) %>%
+  ggplot(aes(x = game_number, y = mu_bij, color = namePlayer)) +
+  geom_line(size = 1.2) +
+  labs(
+    title = "Posterior Scoring Quality Over Time",
+    x = "Game Number in Career",
+    y = expression(mu[bij])
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+```
+
+ 
+12.2.1 
+Task 1 - fit field goal probability as function of ydl
+```{r}
+library(splines)
+nfl = read.csv('../data/12_field-goals.csv')
+head(nfl)
+
+model = glm(fg_made ~ ydl, data = nfl, family = binomial(link = "logit"))
+model_spline <- glm(fg_made ~ bs(ydl, df = 4),  # df = degrees of freedom
+                    data = nfl,
+                    family = binomial(link = "logit"))
+summary(model)
+summary(model_spline)
+```
+```{r}
+#set alpha = 0.95
+
+#use model to predict
+nfl <- nfl %>%
+  mutate(
+    p0 = predict(model_spline, newdata = nfl, type = "response"),
+    FGPA = fg_made - p0
+  )
+
+compute_kicker_quality <- function(data, alpha = 0.9) {
+  data <- data %>%
+    arrange(kicker) %>%
+    group_by(kicker) %>%
+    mutate(kick_num = row_number()) %>%
+    ungroup()
+
+  # Preallocate column for kicker quality
+  data$KQ <- 0
+
+  # Loop over each kicker
+  kicker_list <- unique(data$kicker)
+
+  for (k in kicker_list) {
+    kicker_data <- data[data$kicker == k, ]
+    n_kicks <- nrow(kicker_data)
+    
+    if (n_kicks < 2) next
+
+    kq_vec <- numeric(n_kicks)
+    kq_vec[1] <- 0  # KQ_i1 = 0
+
+    for (j in 2:n_kicks) {
+      kq_vec[j] <- alpha * kq_vec[j - 1] + kicker_data$FGPA[j - 1]
+    }
+
+    data$KQ[data$kicker == k] <- kq_vec
+  }
+
+  return(data)
+}
+
+nfl_kq <- compute_kicker_quality(nfl, alpha = 0.95)
+
+# Sample a few kickers to visualize
+sample_kickers <- nfl_kq %>%
+  distinct(kicker) %>%
+  slice_sample(n = 10) %>%
+  pull(kicker)
+
+# Plot trajectories
+nfl_kq %>%
+  filter(kicker %in% sample_kickers) %>%
+  ggplot(aes(x = kick_num, y = KQ, color = kicker)) +  # color per kicker
+  geom_line(size = 1.2) +
+  labs(
+    title = "Kicker Quality Over Career (α = 0.95)",
+    x = "Kick Number",
+    y = "Kicker Quality (KQ)",
+    color = "Kicker"
+  ) +
+  theme_minimal()
+```
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+

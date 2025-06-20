@@ -1,0 +1,380 @@
+---
+title: "12_Noah"
+author: '38880242'
+date: "2025-06-18"
+output: html_document
+---
+#############
+### SETUP ###
+#############
+
+# install.packages(c("ggplot2", "splines", "tidyverse"))
+library(ggplot2)
+library(splines)
+library(tidyverse)
+
+# set seed
+set.seed(12)
+
+##########################
+### NBA PLAYER QUALITY ###
+##########################
+
+```{r}
+nba <- read_csv("~/Documents/GitHub/summer-lab/2025/labs/data/12_nba-box-scores.csv", col_types = cols(
+  namePlayer  = col_character(),
+  dateGame    = col_date(format = "%Y-%m-%d"),
+  possessions = col_double(),
+  pts         = col_double()
+))
+
+# 2. Flag each player’s first game
+nba_first <- nba %>%
+  arrange(namePlayer, dateGame) %>%
+  group_by(namePlayer) %>%
+  slice_head(n = 1) %>%
+  ungroup()
+
+# 3. Set your known constant C and hyperparameter estimates
+C         <- 0.035     # choice of variance constant (can be tuned)
+mu_hat    <- 0.95      # Task 3: MLE of global mean μ
+tau2_hat  <- 0.02      # Task 4: MLE of prior variance τ²
+
+# 4. Compute X_i, σ_i², and the EB posterior mean per Equation 12.1
+nba_eb <- nba_first %>%
+  mutate(
+    X       = pts / possessions,
+    sigma2  = C / possessions,
+    mu_eb   = (X / sigma2 + mu_hat / tau2_hat) /
+              (1 / sigma2 + 1 / tau2_hat)
+  ) %>%
+  select(namePlayer, dateGame, pts, possessions, mu_eb)
+
+# 5. View
+print(nba_eb)
+
+```
+```{r}
+library(dplyr)
+
+G_min <- 5  
+
+# 1. Compute each player’s per‐game average rate M_i = mean(pts/possessions)
+player_stats <- nba %>%
+  group_by(namePlayer) %>%
+  summarise(
+    games_played = n(),
+    average_rate = mean(pts / possessions, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+# 2. Keep only players with more than G_min games
+eligible_players <- player_stats %>%
+  filter(games_played > G_min)
+
+# 3. Estimate the global prior mean and variance
+global_mean     <- mean(eligible_players$average_rate)
+global_variance <- var( eligible_players$average_rate )
+
+# 4. Inspect
+global_mean
+global_variance
+
+
+
+```
+
+```{r}
+# Task 4: estimate sigma^2 for “average” players
+# (assumes you’ve already defined G_min and global_mean)
+
+tolerance <- 0.02   # choose how “close” a player’s avg rate must be to global_mean
+
+sigma2_hat <- nba %>%
+  group_by(namePlayer) %>%
+  filter(n() > G_min) %>%                            # only players with enough games
+  summarise(
+    avg_rate = mean(pts/possessions, na.rm = TRUE),
+    var_rate = var(pts/possessions, na.rm = TRUE)
+  ) %>%
+  filter(abs(avg_rate - global_mean) < tolerance) %>%  # only “average” players
+  pull(var_rate) %>%
+  mean(na.rm = TRUE)
+sigma2_hat
+```
+```{r}
+library(dplyr)
+
+# 1. Define hyper‐parameters
+G_star            <- 10                 # minimum games
+variance_constant <- 0.035              # C
+global_prior_mean <- 0.95               # μ̂ from Task 3
+tau2_grid         <- 10^seq(-7, -3, 50) # grid of τ² values
+
+# 2. For each player, count games and compute split‐index k
+player_splits <- nba %>%
+  arrange(namePlayer, dateGame) %>%
+  group_by(namePlayer) %>%
+  summarise(
+    games_played = n(),
+    k            = floor(n() / 2)
+  ) %>%
+  ungroup() %>%
+  filter(games_played > G_star)
+
+# 3. Inspect
+print(player_splits)
+
+```
+
+```{r}
+# preallocate
+mean_rmse_grid <- numeric(length(tau2_grid))
+
+for (t in seq_along(tau2_grid)) {
+  tau2      <- tau2_grid[t]
+  rmse_vals <- numeric(nrow(player_splits))
+
+  for (i in seq_len(nrow(player_splits))) {
+    pl    <- player_splits$namePlayer[i]
+    k     <- player_splits$k[i]
+    dfp   <- nba[nba$namePlayer == pl, ]
+
+    # 1) sequential EB on first half
+    mu_prev <- global_prior_mean
+    for (j in seq_len(k)) {
+      rate_j <- dfp$pts[j]        / dfp$possessions[j]
+      var_j  <- variance_constant / dfp$possessions[j]
+      mu_prev <- (rate_j/var_j + mu_prev/tau2) /
+                 (1/var_j   + 1/tau2)
+    }
+    mu_ik <- mu_prev
+
+    # 2) compute RMSE on second half, dropping any NA
+    obs2 <- dfp$pts[(k+1):nrow(dfp)] /
+            dfp$possessions[(k+1):nrow(dfp)]
+    if (length(obs2) > 0) {
+      rmse_vals[i] <- sqrt(
+        mean((mu_ik - obs2)^2, na.rm = TRUE)
+      )
+    } else {
+      rmse_vals[i] <- NA
+    }
+  }
+
+  # store the average RMSE, ignoring any NA’s
+  mean_rmse_grid[t] <- mean(rmse_vals, na.rm = TRUE)
+}
+
+best_tau2 <- tau2_grid[ which.min(mean_rmse_grid) ]
+best_tau2
+
+```
+
+# load data
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# 1. Compute posterior means for every game
+nba_traj <- nba %>%
+  arrange(namePlayer, dateGame) %>%
+  group_by(namePlayer) %>%
+  mutate(
+    game_number = row_number(),
+    rate        = pts / possessions,
+    var_rate    = sigma2_hat / possessions,
+    # sequential EB update
+    mu_post = {
+      prev <- mu_hat
+      out  <- numeric(n())
+      for(i in seq_len(n())) {
+        # prior variance is always tau2_hat
+        num  <- rate[i]/var_rate[i] + prev/tau2_hat
+        den  <- 1/var_rate[i]     + 1/tau2_hat
+        prev <- num/den
+        out[i] <- prev
+      }
+      out
+    }
+  ) %>%
+  ungroup()
+
+# 2. Pick 5 players at random
+set.seed(12)
+sample_players <- nba_traj %>%
+  distinct(namePlayer) %>%
+  slice_sample(n = 5) %>%
+  pull(namePlayer)
+
+# 3. Plot their trajectories
+ggplot(
+  filter(nba_traj, namePlayer %in% sample_players),
+  aes(x = game_number, y = mu_post, color = namePlayer)
+) +
+  geom_line(size = 1) +
+  labs(
+    title = "Empirical-Bayes Posterior Means Over Career",
+    x     = "Game Number j",
+    y     = expression(hat(mu)[ij]),
+    color = "Player"
+  ) +
+  theme_minimal()
+
+```
+
+
+##########################
+### NFL KICKER QUALITY ###
+##########################
+
+
+```{r}
+kick_data = read_csv("../data/12_field-goals.csv")
+head(kick_data)
+
+
+# Task 1: Simple FG probability model as a function of yard line
+
+library(tidyverse)
+library(splines)
+
+
+# 2. Fit a logistic regression with a natural spline on ydl
+#    Here we use 5 degrees of freedom; you can adjust df as needed.
+model_fg0 <- kick_data %>%
+  glm(
+    fg_made ~ ns(ydl, df = 5),
+    data   = .,
+    family = binomial()
+  )
+
+summary(model_fg0)
+
+pred_df <- tibble(ydl = seq(min(kick_data$ydl), max(kick_data$ydl), by = 1)) %>%
+  mutate(
+    p_hat = predict(model_fg0, newdata = ., type = "response")
+  )
+
+ggplot(pred_df, aes(x = ydl, y = p_hat)) +
+  geom_line(size = 1) +
+  labs(
+    title = "Simple FG Success Probability vs. Yard Line",
+    x     = "Yard Line (ydl)",
+    y     = "Predicted P(Field Goal Made)"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+library(dplyr)
+
+# assume you have:
+#   fg            # your field‐goals tibble
+#   model_fg0     # the glm from Task 1 that predicts p_hat
+# and you choose:
+alpha <- 0.8   # for example
+
+fg_quality <- kick_data %>%
+  # 1) get baseline probability and FGPA_j
+  mutate(
+    p0 = predict(model_fg0, newdata = ., type = "response"),
+    FGPA = fg_made - p0
+  ) %>%
+  # 2) for each kicker, compute KQ_ij recursively
+  arrange(kicker, season, week) %>%
+  group_by(kicker) %>%
+  mutate(
+    KQ = {
+      kq_val <- 0
+      out    <- numeric(n())
+      for(i in seq_len(n())) {
+        # at j=1, KQ[1]=0
+        out[i] <- kq_val
+        # update for next j:
+        kq_val <- alpha * kq_val + FGPA[i]
+      }
+      out
+    }
+  ) %>%
+  ungroup()
+
+# Inspect
+fg_quality %>% 
+  select(kicker, season, week, ydl, fg_made, p0, FGPA, KQ) %>%
+  slice_head(n = 10)
+
+
+library(dplyr)
+
+top10_kickers <- fg_quality %>%
+  group_by(kicker) %>%
+  summarise(
+    final_KQ = last(KQ),      # quality going into their last attempt
+    attempts = n()            # just for context
+  ) %>%
+  ungroup() %>%
+  arrange(desc(final_KQ)) %>%
+  slice_head(n = 10)
+
+top10_kickers
+
+
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# 0) assume you already have fg_quality with columns:
+#     kicker, season, week, FGPA
+#    and you’ve fit model_fg0 and computed FGPA = fg_made - p0
+
+# 1) define the loop‐based updater
+compute_kq <- function(fgpa, alpha) {
+  kq_vals <- numeric(length(fgpa))
+  prev     <- 0
+  for(i in seq_along(fgpa)) {
+    kq_vals[i] <- prev
+    prev       <- alpha * prev + fgpa[i]
+  }
+  kq_vals
+}
+
+# 2) choose your decay weight
+alpha <- 0.995
+
+# 3) apply per‐kicker
+fg_kq <- fg_quality %>%
+  arrange(kicker, season, week) %>%
+  group_by(kicker) %>%
+  mutate(
+    kick_number = row_number(),
+    KQ_func     = compute_kq(FGPA, alpha)
+  ) %>%
+  ungroup()
+
+# 4) sample 5 kickers
+set.seed(12)
+sample_kickers <- fg_kq %>%
+  distinct(kicker) %>%
+  slice_sample(n = 5) %>%
+  pull(kicker)
+
+# 5) plot their trajectories
+ggplot(
+  fg_kq %>% filter(kicker %in% sample_kickers),
+  aes(x = kick_number, y = KQ_func, color = kicker)
+) +
+  geom_line(size = 1) +
+  labs(
+    title = "Kicker Quality Trajectories (α = 0.995)",
+    x     = "Kick Number in Career",
+    y     = "Quality Prior to Kick (KQ)"
+  ) +
+  theme_minimal()
+
+```
+

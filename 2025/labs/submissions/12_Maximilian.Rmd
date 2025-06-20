@@ -1,0 +1,316 @@
+---
+title: "12_Maximilian"
+author: "Maximilian J. Gebauer"
+date: "2025-06-18"
+output: html_document
+---
+
+```{r Setup, include=FALSE, results='hide', warning=FALSE}
+knitr::opts_chunk$set(echo = T, fig.width=8, fig.height=4)
+options(scipen = 0, digits = 3)  # controls base R output
+
+# Package setup
+if(!require("pacman")) install.packages("pacman")
+
+pacman::p_load(tidyverse, dplyr, ggthemes, data.table, lubridate, glmnet,
+               GGally, RColorBrewer, ggsci, plotROC, usmap,
+               plotly, ggpubr, vistime, coefplot, skimr, car, ggrepel, slider, lubridate,
+               tidymodels,ranger,vip,ggplot2, tune,dials,pdp, purrr, stringr, lmtest,
+               sandwich)
+```
+
+
+posterior mean of mu_hat_i,1 (one game data) is given by (((Xij/Pij)/sigma2) + (1/tau2) x mu_global)) / (the sum of the between game precision for player and between player precision)
+
+for j>2, posterior mean of mu_hat_j,i is given by: (((Xij/Pij x N_j)/sigma2) + (1/tau2) x mu_global)) / (the sum of the between player precision and the prior precision given by 1 over the variane of mu_i,j-1)
+
+```{r}
+nba_data <- read_csv("/Users/maximiliangebauer/Documents/summer-lab/2025/labs/data/12_nba-box-scores.csv")
+head(nba_data)
+```
+```{r}
+sub_nba <- nba_data %>%
+  group_by(idPlayer) %>%
+  mutate(N=n()) %>%
+  filter(N > 9) %>%
+  ungroup()
+
+sub_nba <- sub_nba %>%
+  filter(possessions > 0)
+```
+
+```{r}
+player_results <- sub_nba %>%
+  group_by(idPlayer) %>%
+  mutate(
+    N = n(),
+    mean_ppp = mean(pts / possessions),
+    var_ppp = var(pts / possessions),
+  ) %>%
+  select(idPlayer,namePlayer,mean_ppp,var_ppp,N) %>%
+  unique() %>%
+  ungroup
+
+head(player_results)
+```
+
+```{r}
+(mu_hat <- mean(player_results$mean_ppp))
+(var_hat <- var(player_results$mean_ppp))
+```
+
+```{r}
+tolerance_upper <- mu_hat + sqrt(var_hat)
+tolerance_lower <- mu_hat - sqrt(var_hat)
+
+filt_players <- player_results %>%
+  filter(mean_ppp <= tolerance_upper & mean_ppp >= tolerance_lower)
+
+
+(mean_vars <- mean(filt_players$var_ppp))
+```
+
+```{r}
+df <- sub_nba
+
+split_df <- df %>%
+  group_by(idPlayer) %>%
+  mutate(
+    row   = row_number(),
+    total = n(),
+    sum_pos = sum(possessions),
+    sum_pts = sum(pts),
+    is_train = row <= ceiling(total/2)
+  ) %>%
+  ungroup()
+
+train_df <- split_df %>%
+  filter(is_train) %>%
+  select(-row, -total, -is_train)
+
+test_df <- split_df %>%
+  filter(!is_train) %>%
+  select(-row, -total, -is_train)
+
+head(train_df)
+```
+```{r}
+train_results <- train_df %>%
+  group_by(idPlayer) %>%
+  mutate(
+    mean_ppp = mean(pts / possessions),
+    var_ppp = var(pts / possessions),
+    N = n()
+  ) %>%
+  select(idPlayer,namePlayer,mean_ppp,var_ppp,N) %>%
+  unique() %>%
+  ungroup
+
+(mu_hat_train <- mean(train_results$mean_ppp))
+(var_hat_train <- var(train_results$mean_ppp))
+```
+
+```{r}
+test_results <- test_df %>%
+  group_by(idPlayer) %>%
+  mutate(
+    mean_g2_ppp = mean(pts / possessions),
+  ) %>%
+  select(idPlayer,mean_g2_ppp) %>%
+  unique() %>%
+  ungroup
+
+total_results <- train_results %>%
+  left_join(test_results,by="idPlayer")
+
+head(total_results)
+```
+
+
+
+```{r}
+global_mu    <- mu_hat_train
+tau2_seq     <- seq(1e-6, 1e-2, length.out = 100)
+n_players    <- nrow(total_results)
+rmse_vec     <- numeric(length(tau2_seq))
+
+#sigma2_train <- sigma_hat_train^2
+#total_results$var_ppp[is.na(total_results$var_ppp)] <-
+  #sigma2_train / total_results$N[is.na(total_results$var_ppp)]
+
+for (i in seq_along(tau2_seq)) {
+  tau2   <- tau2_seq[i]
+  mu_pred <- numeric(n_players)
+  
+  for (j in seq_len(n_players)) {
+    nj     <- total_results$N[j]
+    ybarj  <- total_results$mean_ppp[j]
+    vj     <- total_results$var_ppp[j]
+    
+    # posterior precision for ȳ_j
+    prec_y <- nj / vj
+    prec_0 <- 1  / tau2
+    
+    mu_pred[j] <- ( prec_y * ybarj + prec_0 * global_mu ) /
+                  ( prec_y + prec_0 )
+  }
+  
+  # RMSE across all players for this tau2
+  rmse_vec[i] <- sqrt(
+    mean((mu_pred - total_results$mean_g2_ppp)^2, na.rm = TRUE)
+  )
+}
+
+results <- data.frame(tau2 = tau2_seq, rmse = rmse_vec)
+```
+
+```{r}
+min_rmse <- min(results$rmse)
+
+argmin_tau2 <- results %>%
+  filter(rmse == min_rmse) %>%
+  select(tau2)
+
+argmin_tau2 <- argmin_tau2$tau2
+
+plot(results$tau2, results$rmse, type = "l",
+     xlab = expression(tau^2), ylab = "RMSE",
+     main = "RMSE vs. tau^2")
+abline(v = argmin_tau2,      # the x-intercept
+       col = "red",    # line color
+       lty = 2,        # dashed line type
+       lwd = 2)
+
+argmin_tau2
+min_rmse
+```
+
+optimum tau2 for minimizing rmse is 0.000809
+
+```{r}
+task6 <- sub_nba %>%
+  arrange(idPlayer, idGame)
+
+task6 <- task6 %>%
+  mutate(
+    ppp = pts / possessions,
+  )
+head(task6)
+```
+
+```{r}
+sigma2 <- 0.01
+# 2. Compute running (cumulative) posterior mean after each game
+post_traj <- task6 %>%
+  group_by(idPlayer) %>%
+  mutate(
+    n_obs    = row_number(),           # 1,2,3,… games seen so far
+    cum_mean = cummean(ppp),           # running sample mean of ppp
+    post_mu  = ( (n_obs/sigma2)*cum_mean + (1/tau2)*global_mu ) /
+               ( (n_obs/sigma2)        + (1/tau2) )
+  ) %>%
+  ungroup()
+
+# 3. Pick a random sample of players to plot 
+set.seed(42)
+sample_players <- sample(unique(post_traj$idPlayer), 6)
+
+post_traj %>%
+  filter(idPlayer %in% sample_players) %>%
+  group_by(idPlayer) %>%
+  mutate(game_index = row_number()) %>%    # 1,2,3,… per player
+  ungroup() %>%
+  ggplot(aes(x = game_index, y = post_mu, color = factor(idPlayer))) +
+    geom_line(size = 1) +
+    labs(
+      x     = "Game Number in Career",
+      y     = expression(mu[bij]),
+      color = "Player"
+    ) +
+    scale_x_continuous(breaks = scales::pretty_breaks(10)) +  # nicer tick placement
+    theme_minimal()
+```
+
+
+
+```{r}
+kick_data <- read_csv("/Users/maximiliangebauer/Documents/summer-lab/2025/labs/data/12_field-goals.csv")
+head(kick_data)
+```
+Fit simple logistic model of logit(fg made) on yardline
+```{r}
+model_1 <- glm(as.factor(fg_made) ~ ydl, data = kick_data, family = "binomial")
+summary(model_1)
+```
+
+formula from logistic regression: p(make) = exp(4.10758 - 0.10470 x ydl) / (1 + exp(4.10758 - 0.10470 x ydl)), did not use splines or polynomials for simplicitly later on, I would use them if I wanted a better model.
+
+
+
+We use the additive recursive nature of the formula for KQ to define a closed form formula for KQ for the ith player prior to/at the jth attempt only in terms of alpha and FGPA. We rely on the fact that KQ_i,0 = 0 (def). Observe that for KQ_i,j = alpha x KQ_i,j-1 + FGPA_i,j-1, we can write KQ_i,j-1 recursively as KQ_i,j-1 = alpha x KQ_i,j-2 + FGPA_i,j-2, iterating this recursive step and observing that base KQ_i,0 = 0, and since the "nesting" operation in the full recursive form is addition, we derive: KQ_i,j = sum from k=1 to j-1 of alpha^(j-k-1) x FGPA_i,k where k indexes kicks, j is the index of the jth kick where we want KQ before that kick occurs, and i indexes Kicker identity. The formula for j=1 (no kicks) returns 0, as it must, for j=2 we have KQ_i,2 = alpha^(2-1-1) x FGPA_i,1 = FGPA_i,1, as it must, and for j=3 we have: alpha x  FGPA_i,1 + FGPA_i,2, as it must. With a for loop we can still use the fully recursive form, but the closed form solution is valid.
+
+
+```{r}
+kicker_data <- kick_data %>%
+  group_by(kicker) %>%
+  arrange(season, week, .by_group = TRUE) %>%
+  ungroup()
+
+kq_update <- function(prev_kq,outcome,alpha, ydl) {
+  new_kq = alpha * prev_kq + outcome - exp(4.10758 - 0.10470*ydl) / (1 + exp(4.10758 - 0.10470*ydl))
+}
+```
+
+```{r}
+kickers   <- unique(kicker_data$kicker)
+alpha     <- 0.999
+
+# prepare an output column
+kicker_data$KQ <- NA_real_
+
+for (pl in kickers) {
+  data_i    <- filter(kicker_data, kicker == pl)
+  n         <- nrow(data_i)
+  
+  # if you want to keep the initial zero as element 1, do n+1:
+  kq_vec    <- numeric(n + 1)
+  kq_vec[1] <- 0
+  
+  for (j in seq_len(n)) {
+    # ### make sure this matches your real column name ###
+    made   <- data_i$fg_made[j]   # or data_i$FG[j], etc.
+    ydl    <- data_i$ydl[j]
+    
+    # baseline prob
+    p0     <- plogis(4.10758 - 0.10470 * ydl)
+    fgpa   <- made - p0
+    
+    # write into j+1
+    kq_vec[j+1] <- alpha * kq_vec[j] + fgpa
+  }
+  
+  # if you only care about the post-kick KQs, drop the first element:
+  kicker_data$KQ[kicker_data$kicker == pl] <- kq_vec[-1]
+}
+```
+
+
+Plotted kickers N > 300 kicks below (should be ones best represented by the model given selection bias), we see KQ trends are noiser for earlier observations when the sample is small and the kicker is early career, but tend to stabilze more over time. Also tend to increase over time, indicating that these kickers improved over their careers (naturally, we do not observe kickers who get worse consistetently over time with many kicks, as such kickers presumably are cut/do not start). 
+
+
+```{r}
+kicker_data %>%
+  group_by(kicker) %>%
+  mutate(N=n(),
+         kick_index = row_number()) %>%
+  filter(N > 300) %>%
+  ungroup() %>%
+  ggplot(aes(x=kick_index,y=KQ,group=kicker,color=kicker)) +
+  geom_point(size=1,alpha=0.5)
+```
+
+
+
+
+
+
