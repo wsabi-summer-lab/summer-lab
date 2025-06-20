@@ -65,7 +65,6 @@ alpha_summary <- tibble(
   upper = apply(alpha_samples, 2, quantile, 0.975)
 )
 
-
 ggplot(alpha_summary, aes(x = reorder(team, mean), y = mean)) +
   geom_point() +
   geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2) +
