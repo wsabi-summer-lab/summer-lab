@@ -1,0 +1,87 @@
+---
+title: "14_Drew"
+output: html_document
+date: "2025-06-20"
+---
+
+```{r}
+#############
+### SETUP ###
+#############
+
+# install.packages(c("ggplot2", "rstan", "tidyverse"))
+library(ggplot2)
+library(rstan)
+library(tidyverse)
+
+# set seed
+set.seed(14)
+
+#################
+### NFL GAMES ###
+#################
+
+# load NFL games data from 2018-2023
+nfl_data = read_csv("../data/14_nfl-games.csv")
+# Create team indices
+teams <- sort(unique(c(nfl_data$home_team, nfl_data$away_team)))
+team_indices <- setNames(seq_along(teams), teams)
+
+# Add indexed columns
+nfl_data <- nfl_data %>%
+  mutate(
+    H = team_indices[home_team],
+    A = team_indices[away_team],
+    S = season - min(season) + 1,
+    y = pts_H_minus_A
+  )
+nfl_data <- nfl_data %>%
+  mutate(
+    H = team_indices[home_team],
+    A = team_indices[away_team],
+    S = season - min(season) + 1,
+    y = pts_H_minus_A
+  )
+# Load stan Data
+model <- stan_model(file = "glickman-stern.stan")
+# create list  of data compliant with stan model
+stan_data <- list(
+  N_games = nrow(nfl_data),
+  N_teams = length(teams),
+  N_seasons = length(unique(nfl_data$season)),
+  y = nfl_data$y,
+  H = nfl_data$H,
+  A = nfl_data$A,
+  S = nfl_data$S
+)
+
+# Fit the model
+fit <- sampling(model, data = stan_data, iter = 1500, chains = 1, seed = 1234)
+fit
+# Extract the results
+samples <- rstan::extract(fit)
+
+team_samples = samples$alpha_team
+
+team_means = apply(team_samples, 2, mean)
+team_95ci = apply(team_samples, 2, quantile, probs = c(0.025, 0.975))
+
+team_df <- data.frame(
+  team = teams,
+  mean = team_means,
+  lower = team_95ci[1, ],
+  upper = team_95ci[2, ]
+)
+# Plot with proper error bars
+ggplot(team_df, aes(x = reorder(team, mean), y = mean)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2) +
+  coord_flip() +
+  labs(title = "Team Strength Estimates with 95% Credible Intervals",
+       x = "Team",
+       y = "Strength Estimate") +
+  theme_minimal()
+
+
+
+
