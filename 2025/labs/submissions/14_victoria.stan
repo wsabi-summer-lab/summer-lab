@@ -30,7 +30,7 @@ model {
   }
 
   // Priors
-  beta_0 ~ normal(0, 5);
+  #beta_0 ~ normal(0, 5);
   sigma_games ~ normal(0, 5);
   sigma_teams ~ normal(0, 5);
   sigma_seasons ~ normal(0, 5);

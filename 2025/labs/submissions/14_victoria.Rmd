@@ -52,10 +52,42 @@ fit
 ```
 
 ```{r}
-posterior <- extract(fit)
+posterior <- as.matrix(fit)
 alpha_samples <- as.matrix(fit, pars = "alpha")
+beta_colnames <- grep("beta\\[[0-9]+,6\\]", colnames(posterior), value = TRUE)
+
+# Subset just the columns for the latest season
+
+
+beta_samples <- posterior[, beta_colnames]
+
+# Check dimensions
+str(beta_samples)  # Should be [iterations x teams]
+
+# Summary table
+beta_summary <- tibble(
+  team = names(team_indices),  # should match Stan team order
+  mean = apply(beta_samples, 2, mean),
+  lower = apply(beta_samples, 2, quantile, 0.025),
+  upper = apply(beta_samples, 2, quantile, 0.975)
+)
+
+# Plot team strength
+ggplot(beta_summary, aes(x = reorder(team, mean), y = mean)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2) +
+  coord_flip() +
+  labs(
+    title = "Posterior Means of Team Strength (Most Recent Season)",
+    x = "Team",
+    y = "Estimated Team Strength (β)"
+  ) +
+  theme_minimal()
 
 # Check structure
+
+```
+```{r}
 str(alpha_samples)
 
 alpha_summary <- tibble(
