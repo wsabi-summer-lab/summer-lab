@@ -1,19 +1,153 @@
 ---
-title: "R Notebook"
+title: "13 - Shrinkage Estimation"
 output: html_notebook
 ---
 
-This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
-
-Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+Task 1 - fit equations 
 
 ```{r}
 putting = read.csv('../data/13_putts-train.csv')
+head(putting)
+
+#equation 13.1 - global mean 
+p1 = mean(putting$X)
+print(p1) 
+
+putting <- putting %>% 
+  mutate(
+    p1 = p1
+  )
+
+head(putting)
+```
+We see that the average putting% for all golfers is 0.403766 
+
+Equation 2, the MLE, is just the column of X already in the dataset 
+
+```{r}
+#equation 3 
+
+#define constant C for all players
+putting <- putting %>% 
+  mutate(
+    C = p1*(1-p1),
+    Xi_tilde = X/(sqrt(C/N)), 
+    Xi_tilde_bar = sum(Xi_tilde)/length(putting),
+    Sx2 = sum(Xi_tilde - Xi_tilde_bar)^2,
+    theta_em =Xi_tilde_bar + (1-((length(putting)-1)/Sx2)) * (Xi_tilde - Xi_tilde_bar ),
+    p3 = sqrt(C/N) * theta_em
+  )
+
+head(putting)
 ```
 
-Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+We see that the estimates are similar to the MLE, with pretty much the same numbers for the first three digits
 
-When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+```{r}
+#equation 4 - variance stabilizing transformation
 
-The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+putting <- putting %>% 
+  mutate(
+    H = X * N, #add column for hits per each golfer
+    Xi_doubletilde = asin(sqrt((H+3/8)/(N+3/4))), 
+    nu_i2 = 1/4/N,
+    nu = sqrt(nu_i2),
+    new_Xi_tilde = Xi_doubletilde/nu,
+    new_Xi_tilde_bar = sum(new_Xi_tilde)/length(putting),
+    new_Sx2 = sum(new_Xi_tilde - Xi_doubletilde_bar)^2,
+    theta_em2 = new_Xi_tilde_bar +  (1-((length(putting)-1)/new_Sx2)) *(new_Xi_tilde - new_Xi_tilde_bar),
+    p4 = (sin(nu*theta_em2))^2
+  )
+
+
+putting_cleaned <- putting %>% 
+  select(Player, N, X, p1, p3, p4)
+
+head(putting_cleaned)
+```
+
+We see that values are still relatively similar to p2, the MLE, but the digits are slightly more divergent after the thousandths
+
+```{r}
+#equation 5 
+putting <- putting %>% 
+  mutate(
+    Sx2_5 = 1/(length(putting)-1) * sum(X-p),
+    tau2 = Sx2_5 - C*mean(1/N),
+    p5 = p + tau2/(tau2+(C/N))*(X-p)
+  )
+
+putting_cleaned <- putting %>% 
+  select(Player, N, X, p1, p3, p4, p5)
+head(putting)
+head(putting_cleaned)
+```
+```{r}
+#equation 6 
+putting <- putting %>% 
+  mutate(
+    Xi_tilde_6 = asin(sqrt((H+3/8)/(N+3/4))),
+    Xi_tilde_6_bar = sum(Xi_tilde_6)/length(putting),
+    Sx2_6 = 1/(length(putting)-1)*sum(new_Xi_tilde- new_Xi_tilde_bar)^2,
+    new_tau2 = new_Sx2 - sum(nu_i2)/length(putting),
+    theta_em2_hat = Xi_tilde_6_bar + new_tau2/(new_tau2+nu_i2)*(Xi_tilde_6-Xi_tilde_6_bar),
+    p6 = sin(theta_em2_hat)^2
+  )
+
+putting_cleaned <- putting %>% 
+  select(Player, N, X, p1, p3, p4, p5, p6)
+
+head(putting_cleaned)
+```
+Task 2 - compare estimates to test data with MSE 
+
+```{r}
+putting_test = read.csv('../data/13_putts-test.csv')
+mse <- function(predicted, actual) {
+  mean((predicted - actual)^2)
+}
+
+#compute MSE for each 
+
+mse <- function(predicted, actual) {
+  mean((predicted - actual)^2)
+}
+
+tibble(
+  model = c("p1", "p2", "p3", "p4", "p5", "p6"),
+  mse = c(
+    mse(putting_cleaned$p1, putting_test$X),
+    mse(putting_cleaned$X, putting_test$X),
+    mse(putting_cleaned$p3, putting_test$X),
+    mse(putting_cleaned$p4, putting_test$X),
+    mse(putting_cleaned$p5, putting_test$X),
+    mse(putting_cleaned$p6, putting_test$X)
+  )
+)
+
+```
+Task 3 - Erm for some reason the global mean is the best, then mse4, then mse6, then mse5, mse3, and then the MLE
+
+Task 4: Plot predicted performances against each estimate
+```{r}
+putting_cleaned <- putting_cleaned %>% 
+  mutate(result = putting_test$X)
+  
+putting_long <- putting_cleaned %>%
+  select(-N, -Player) %>%  # drop column N
+  pivot_longer(cols = starts_with("p"), names_to = "prediction_set", values_to = "predicted")
+
+# Now plot each prediction line against the test value X
+ggplot(putting_long, aes(x = result, y = predicted, color = prediction_set)) +
+  geom_point() +
+  geom_line() +
+  geom_abline(slope = 1, intercept = 0, color = "black", linetype = "dashed") +
+  labs(title = "Model Predictions vs True X",
+       x = "True Test Value (X)",
+       y = "Predicted Value",
+       color = "Prediction Set") +
+  facet_wrap(~prediction_set) +
+  theme_minimal()
+```
+
 
