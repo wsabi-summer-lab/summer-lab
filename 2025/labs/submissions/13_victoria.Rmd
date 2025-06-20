@@ -1,0 +1,155 @@
+---
+title: "13 - Shrinkage Estimation"
+output: html_notebook
+---
+
+Task 1 - fit equations 
+
+```{r}
+putting = read.csv('../data/13_putts-train.csv')
+head(putting)
+
+#equation 13.1 - global mean 
+p1 = mean(putting$X)
+print(p1) 
+
+putting <- putting %>% 
+  mutate(
+    p1 = p1
+  )
+
+head(putting)
+```
+We see that the average putting% for all golfers is 0.403766 
+
+Equation 2, the MLE, is just the column of X already in the dataset 
+
+```{r}
+#equation 3 
+
+#define constant C for all players
+putting <- putting %>% 
+  mutate(
+    C = mean(X)*(1-mean(X)),
+    Xi_tilde = X/(sqrt(C/N)), 
+    Xi_tilde_bar = mean(Xi_tilde),
+    Sx2 = sum((Xi_tilde - Xi_tilde_bar)^2),
+    theta_em =Xi_tilde_bar + (1-((length(putting)-1)/Sx2)) * (Xi_tilde - Xi_tilde_bar),
+    p3 = sqrt(C/N) * theta_em
+  )
+
+head(putting)
+```
+
+We see that the estimates are similar to the MLE, with pretty much the same numbers for the first three digits
+
+```{r}
+#equation 4 - variance stabilizing transformation
+
+k = length(putting) 
+
+putting <- putting %>% 
+  mutate(
+    H = X * N, #add column for hits per each golfer
+    Xi_doubletilde = asin(sqrt((H+3/8)/(N+3/4))), 
+    nu_i2 = 1/(4*N),
+    nu = sqrt(nu_i2),
+    new_Xi_tilde = Xi_doubletilde/nu,
+    new_Xi_tilde_bar = mean(new_Xi_tilde),
+    new_Sx2 = sum((new_Xi_tilde - new_Xi_tilde_bar)^2),
+    theta_em2 = new_Xi_tilde_bar +  (1-(k-1)/new_Sx2) *(new_Xi_tilde - new_Xi_tilde_bar),
+    p4 = (sin(nu*theta_em2))^2
+  )
+
+
+putting_cleaned <- putting %>% 
+  select(Player, N, X, p1, p3, p4)
+
+head(putting_cleaned)
+```
+
+We see that values are still relatively similar to p2, the MLE, but the digits are slightly more divergent after the thousandths
+
+```{r}
+#equation 5 
+putting <- putting %>% 
+  mutate(
+    Sx2_5 = sum((X - mean(X))^2) / (k - 1),
+    tau2 = var(X) - C*mean(1/N),
+    p5 = p1 + tau2/(tau2+(C/N))*(X-p1)
+  )
+
+putting_cleaned <- putting %>% 
+  select(Player, N, X, p1, p3, p4, p5)
+head(putting)
+head(putting_cleaned)
+```
+```{r}
+#equation 6 
+putting <- putting %>% 
+  mutate(
+    Xi_tilde_6 =asin(sqrt((H+ 3/8) / (N + 3/4))),
+    Xi_tilde_6_bar = mean(Xi_tilde_6),
+    Sx2_6 = sum((Xi_tilde_6 - Xi_tilde_6_bar)^2)/(k-1),
+    new_tau2 = Sx2_6 - mean(nu_i2),
+    theta_em2_hat = Xi_tilde_6_bar + (new_tau2/(new_tau2+nu_i2))*(Xi_tilde_6-Xi_tilde_6_bar),
+    p6 = sin(theta_em2_hat)^2
+  )
+
+putting_cleaned <- putting %>% 
+  select(Player, N, X, p1, p3, p4, p5, p6)
+
+head(putting_cleaned)
+```
+Task 2 - compare estimates to test data with MSE 
+
+```{r}
+putting_test = read.csv('../data/13_putts-test.csv')
+mse <- function(predicted, actual) {
+  mean((predicted - actual)^2)
+}
+
+#compute MSE for each 
+
+putting_results <- bind_cols(putting_cleaned, X_test = putting_test$X)
+
+tibble(
+  model = c("p1", "p2", "p3", "p4", "p5", "p6"),
+  mse = c(
+    mse(putting_results$p1, putting_results$X_test),
+    mse(putting_results$X,   putting_results$X_test),
+    mse(putting_results$p3,  putting_results$X_test),
+    mse(putting_results$p4,  putting_results$X_test),
+    mse(putting_results$p5,  putting_results$X_test),
+    mse(putting_results$p6,  putting_results$X_test)
+  )
+)
+
+```
+Task 3 - Erm for some reason the global mean is the best, then mse4, then mse6, then mse5, mse3, and then the MLE
+
+Task 4: Plot predicted performances against each estimate
+```{r}
+putting_cleaned <- putting_cleaned %>% 
+  mutate(result = putting_test$X)
+  
+putting_long <- putting_cleaned %>%
+  select(-N, -Player) %>%  # drop column N
+  pivot_longer(cols = starts_with("p"), names_to = "prediction_set", values_to = "predicted")
+
+# Now plot each prediction line against the test value X
+ggplot(putting_long, aes(x = result, y = predicted, color = prediction_set)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, color = "black", linetype = "dashed") +
+  labs(title = "Model Predictions vs True X",
+       x = "True Test Value (X)",
+       y = "Predicted Value",
+       color = "Prediction Set") +
+  facet_wrap(~prediction_set) +
+  theme_minimal()
+```
+
+```{r}
+
+```
+
