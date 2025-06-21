@@ -1,0 +1,115 @@
+---
+title: "14 - fully bayesian models"
+output: html_notebook
+---
+
+Preliminary Data Cleaning
+
+```{r}
+
+library(rstan)
+library(tidyverse)
+library(ggplot2)
+
+nfl_data = read.csv("../data/14_nfl-games.csv")
+head(nfl_data)
+teams <- sort(unique(c(nfl_data$home_team, nfl_data$away_team)))
+team_indices <- setNames(seq_along(teams), teams)
+
+# 3. Assign numeric team indices
+nfl_data <- nfl_data %>%
+  mutate(
+    H = team_indices[home_team],
+    A = team_indices[away_team]
+  )
+
+nfl_data <- nfl_data %>% 
+  mutate(s_i = season - 2017,
+         home_team = as.factor(home_team),
+         away_team = as.factor(away_team),
+         home_win = (total_home_score - total_away_score)
+           )
+
+head(nfl_data)
+```
+
+Task 1 - fit model
+
+```{r}
+stan_model <- stan_model(file = "14_victoria.stan")
+data_train <- list(
+  N_games = nrow(nfl_data),
+  N_teams = length(team_indices),
+  N_seasons = length(unique(nfl_data$season)),
+  y = nfl_data$pts_H_minus_A,
+  H = nfl_data$H,
+  A = nfl_data$A,
+  S = nfl_data$s_i
+)
+# train the model
+fit = sampling(stan_model, data = data_train , iter = 1500, chains = 1, seed = 12345)
+fit
+```
+
+```{r}
+posterior <- as.matrix(fit)
+alpha_samples <- as.matrix(fit, pars = "alpha")
+beta_colnames <- grep("beta\\[[0-9]+,6\\]", colnames(posterior), value = TRUE)
+
+# Subset just the columns for the latest season
+
+
+beta_samples <- posterior[, beta_colnames]
+
+# Check dimensions
+str(beta_samples)  # Should be [iterations x teams]
+
+# Summary table
+beta_summary <- tibble(
+  team = names(team_indices),  # should match Stan team order
+  mean = apply(beta_samples, 2, mean),
+  lower = apply(beta_samples, 2, quantile, 0.025),
+  upper = apply(beta_samples, 2, quantile, 0.975)
+)
+
+# Plot team strength
+ggplot(beta_summary, aes(x = reorder(team, mean), y = mean)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2) +
+  coord_flip() +
+  labs(
+    title = "Posterior Means of Team Strength (Most Recent Season)",
+    x = "Team",
+    y = "Estimated Team Strength (β)"
+  ) +
+  theme_minimal()
+
+# Check structure
+
+```
+```{r}
+str(alpha_samples)
+
+alpha_summary <- tibble(
+  team = names(team_indices),
+  mean = apply(alpha_samples, 2, mean),
+  lower = apply(alpha_samples, 2, quantile, 0.025),
+  upper = apply(alpha_samples, 2, quantile, 0.975)
+)
+
+ggplot(alpha_summary, aes(x = reorder(team, mean), y = mean)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2) +
+  coord_flip() +
+  labs(
+    title = "Posterior Means of Team-Specific Home Field Advantage",
+    x = "Team",
+    y = "Estimated Home Field Advantage (α_j)"
+  ) +
+  theme_minimal()
+```
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
