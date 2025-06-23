@@ -1,0 +1,168 @@
+---
+title: "lab 13"
+output:
+  pdf_document: default
+  html_document: default
+date: "2025-06-23"
+---
+
+```{r setup, include=FALSE}
+#############
+### SETUP ###
+#############
+
+# install.packages(c("ggplot2", "tidyverse"))
+library(ggplot2)
+library(tidyverse)
+
+# set seed
+set.seed(13)
+
+####################
+### GOLF PUTTING ###
+####################
+
+# load training data (first half of season)
+putts_train = read_csv("../data/13_putts-train.csv")
+# preview data
+head(putts_train)
+
+# load test data (second half of season)
+putts_test = read_csv("../data/13_putts-test.csv")
+# preview data
+head(putts_test)
+```
+
+```{r}
+#13.1 and 13.2 model
+data = putts_train %>%
+ mutate(
+   m1 = mean(X),
+   m2 = X
+ )
+
+#EF1
+data = data %>%
+ mutate(
+   EF1 = {
+     C = mean(X)*(1 - mean(X))
+     sig = sqrt(C/N)
+     xi_ = X/sig
+     x_bar = mean(xi_)
+     s2x_ = sum((xi_ - x_bar)^2)
+     theta = x_bar + (1 - (n() - 1)/s2x_) * (xi_ - x_bar)
+     
+     theta * sig
+   }
+ )
+
+#EF2
+data = data %>%
+  mutate(
+    EF2 = {
+      H = X * N
+      num = H + 3/8
+      denom = N + 3/4
+      X2 = asin(sqrt(num / denom))        
+      nu = 1 / (2 * sqrt(N))            
+      X3 = X2 / nu                      
+
+      x_bar = mean(X3)
+      s2x_ = sum((X3 - x_bar)^2)
+      theta = x_bar + (1 - (n() - 1)/s2x_) * (X3 - x_bar)
+
+      sin(nu * theta)^2                   
+    }
+  )
+
+#EB1
+data = data %>%
+  mutate(
+    EB1 = {
+      C = mean(X) * (1 - mean(X))
+      u = m1
+      tau2 = var(X)- (C/mean(N))
+      
+      u + (tau2)*(X-u)/(tau2 + C/N)
+    }
+  )
+
+#EB2
+data <- data %>%
+  mutate(
+    EB2 = {
+      H = X * N
+      X2 = asin(sqrt((H + 3/8) / (N + 3/4)))   
+      nu2 = 1 / (4 * N)                        
+
+      mu = mean(X2)
+      tau2 = var(X2) - mean(nu2)
+
+      shrink = tau2 / (tau2 + nu2)
+      theta = mu + shrink * (X2 - mu)
+
+      sin(theta)^2                            
+    }
+  )
+
+
+```
+
+```{r, echo = FALSE}
+mse_values = data.frame(
+  model = c("m1", "m2", "EF1", "EF2", "EB1", "EB2"),
+  mse = c(
+    mean((putts_test$X - data$m1)^2),
+    mean((putts_test$X - data$m2)^2),
+    mean((putts_test$X - data$EF1)^2),
+    mean((putts_test$X - data$EF2)^2),
+    mean((putts_test$X - data$EB1)^2),
+    mean((putts_test$X - data$EB2)^2)
+  )
+)
+
+mse_values = mse_values %>%
+  arrange(mse)
+head(mse_values)
+
+
+
+```
+Bayes by far the best, with simple estimate=x the worst
+
+```{r, echo = FALSE}
+
+# give X from putt_test in a data frame with the other columns from data
+preds = putts_test %>%
+  mutate(
+    m1 = data$m1,
+    m2 = data$m2,
+    EF1 = data$EF1,
+    EF2 = data$EF2,
+    EB1 = data$EB1,
+    EB2 = data$EB2
+  )
+plot_data <- preds %>%
+  select(X, m1, m2, EF1, EF2, EB1, EB2) %>%
+  pivot_longer(
+    cols = -X,
+    names_to = "Estimator",
+    values_to = "Predicted"
+  ) %>%
+  rename(True = X)
+
+# Plot
+ggplot(plot_data, aes(x = True, y = Predicted, color = Estimator)) +
+  geom_point(alpha = 0.6) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  labs(
+    title = "True Second-Half Putting Performances vs Predicted Estimates",
+    x = "True Putting Performance (X)",
+    y = "Predicted Estimate (pb)",
+    color = "Estimator"
+  ) +
+  theme_minimal()
+
+
+```
+
