@@ -1,0 +1,184 @@
+---
+title: "Shrinkage 13 Max"
+author: "Maximilian J. Gebauer"
+date: "2025-06-20"
+output: html_document
+---
+
+```{r Setup, include=FALSE, results='hide', warning=FALSE}
+knitr::opts_chunk$set(echo = T, fig.width=8, fig.height=4)
+options(scipen = 0, digits = 3)  # controls base R output
+
+# Package setup
+if(!require("pacman")) install.packages("pacman")
+
+pacman::p_load(tidyverse, dplyr, ggthemes, data.table, lubridate, glmnet,
+               GGally, RColorBrewer, ggsci, plotROC, usmap,
+               plotly, ggpubr, vistime, coefplot, skimr, car, ggrepel, slider, lubridate,
+               tidymodels,ranger,vip,ggplot2, tune,dials,pdp, purrr, stringr, lmtest,
+               sandwich)
+```
+
+```{r}
+putts_train <- read.csv("/Users/maximiliangebauer/Documents/summer-lab/2025/labs/data/13_putts-train.csv")
+```
+
+```{r}
+head(putts_train)
+names(putts_train)
+```
+```{r}
+(overall_mean <- mean(putts_train$X))
+```
+Player-level MLE for p_i hat is just X_i, add new column just for clarity
+```{r}
+putts_train <- putts_train %>%
+  mutate(
+    MLE_i = X
+  )
+```
+
+```{r}
+(C <- overall_mean * (1 - overall_mean))
+putts_train <- putts_train %>%
+  mutate(
+    X_tilde = X / sqrt(C / N)
+  )
+```
+
+```{r}
+(sx2 <- sum((putts_train$X_tilde -mean(putts_train$X_tilde))^2))
+
+(mean_xtilde <- mean(putts_train$X_tilde))
+``` 
+
+```{r}
+putts_train <- putts_train %>%
+  mutate(
+    theta_hat = mean_xtilde + (1 - (196/sx2)) * (X_tilde - mean_xtilde)
+  )
+```
+
+```{r}
+putts_train <- putts_train %>%
+  mutate(
+    p_em = (sqrt(C / N)) * theta_hat
+  )
+```
+
+```{r}
+head(putts_train)
+```
+
+```{r}
+putts_train <- putts_train %>%
+  mutate(H = round(X * N))
+```
+```{r}
+putts_train <- putts_train %>%
+  mutate(
+    new_X_tilde = asin(sqrt((H + 3/8)/(N + 3/4)))
+  )
+head(putts_train)
+```
+
+```{r}
+putts_train <- putts_train %>%
+  mutate(
+    nu_i = sqrt(1 / (4 * N))
+  )
+head(putts_train)
+```
+
+```{r}
+putts_train <- putts_train %>%
+  mutate(
+    two_X_tilde = new_X_tilde / nu_i
+  )
+head(putts_train)
+```
+```{r}
+(sx2_tilde <- sum((putts_train$two_X_tilde -mean(putts_train$two_X_tilde))^2))
+```
+
+```{r}
+putts_train <- putts_train %>%
+  mutate(
+    theta_hat_tilde = mean(two_X_tilde) + (1 - 196/sx2_tilde) * (two_X_tilde - mean(two_X_tilde))
+  )
+head(putts_train)
+```
+
+```{r}
+putts_train <- putts_train %>%
+  mutate(
+    p_em_2 = (sin(nu_i * theta_hat_tilde))^2
+  )
+head(putts_train)
+```
+
+```{r}
+(sx2_eb <- var(putts_train$X))
+(tau_hat_2 <- sx2_eb - C * mean(1/putts_train$N))
+```
+
+```{r}
+putts_train <- putts_train %>%
+  mutate(
+    p_eb_1 = overall_mean + ((tau_hat_2 / (tau_hat_2 + (C / N))) * (X - overall_mean))
+  )
+head(putts_train)
+```
+new_X_tilde, 
+```{r}
+(mean_double_tilde <- mean(putts_train$new_X_tilde))
+(var_double_tilde <- var(putts_train$new_X_tilde))
+(mean_nu_2 <- mean((putts_train$nu_i)^2))
+(new_tau_2 <- var_double_tilde - mean_nu_2)
+
+putts_train <- putts_train %>%
+  mutate(
+    theta_hat_eb2 = mean_double_tilde + (new_tau_2 / (new_tau_2 + nu_i^2)) * (new_X_tilde - mean_double_tilde))
+head(putts_train)
+```
+
+```{r}
+putts_train <- putts_train %>%
+  mutate(
+    p_eb_2 = (sin(theta_hat_eb2))^2
+  )
+head(putts_train)
+```
+
+```{r}
+putts_test <- read.csv("/Users/maximiliangebauer/Documents/summer-lab/2025/labs/data/13_putts-test.csv")
+head(putts_test)
+```
+
+```{r}
+(mse_1 <- mean((overall_mean - putts_test$X)^2))
+(mse_2 <- mean((putts_train$X - putts_test$X)^2))
+(mse_3 <- mean((putts_train$p_em - putts_test$X)^2))
+(mse_4 <- mean((putts_train$p_em_2 - putts_test$X)^2))
+(mse_5 <- mean((putts_train$p_eb_1 - putts_test$X)^2))
+(mse_6 <- mean((putts_train$p_eb_2 - putts_test$X)^2))
+```
+Best = EB 2
+Worst = player-level MLE
+
+```{r}
+new_putt <- putts_train %>% 
+  left_join(putts_test%>%rename(test_X = X), by = "Player")
+```
+
+```{r}
+ggplot(new_putt, aes(x = test_X, y = overall_mean)) + geom_point()
+ggplot(new_putt, aes(x = test_X, y = X)) + geom_point()
+ggplot(new_putt, aes(x = test_X, y = p_em)) + geom_point()
+ggplot(new_putt, aes(x = test_X, y = p_em_2)) + geom_point()
+ggplot(new_putt, aes(x = test_X, y = p_eb_1)) + geom_point()
+ggplot(new_putt, aes(x = test_X, y = p_eb_2)) + geom_point()
+```
+
+
+

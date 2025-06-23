@@ -51,6 +51,8 @@ sigma2_hat = average_players %>%
   summarize(sigma2 = mean(variance, na.rm = TRUE)) %>% 
   pull(sigma2)
 
+print(sigma2_hat)
+
 ```
 
 Task 5: Estimate T$^2$
@@ -116,22 +118,62 @@ ggplot(tau2_results, aes(x = tau2, y = mean_RMSE)) +
 ```
 Compute posterior means
 ```{r}
-w <- 1 / sigma2_hat / (1 / sigma2_hat + 1 / tau2_hat)
 
-# Compute posterior mean for each player/game
-nba_posterior <- nba_variance %>%
+nba_variance_posterior <- nba_variance %>% 
+  group_by(namePlayer) %>%
+  arrange(dateGame) %>% 
   mutate(
-    mu_bij = w * X + (1 - w) * mu_hat
-  )
+    X = pts / possessions,
+    sigma2_hat = sigma2_hat,
+    tau2_hat = best_tau2$tau2
+  ) %>% 
+  ungroup()
+  
+```
 
-sample_players <- nba_posterior %>%
+Plot 
+```{r}
+nba_posterior <- nba_variance_posterior %>%
+  arrange(namePlayer, dateGame) %>% 
+  group_by(namePlayer) %>% 
+  mutate(
+    ppp = pts/possessions,
+    mu_bij = NA_real_,
+    game_num = row_number()
+    w = 1 / (sigma2_hat + game_num * tau2_hat)
+  
+  ) %>% 
+  group_split()
+  
+for (i in seq_along(nba_posterior)) {
+  player_df <- nba_posterior[[i]]  # use [[i]] not [i]
+  n_games <- nrow(player_df)
+  
+  mu_vec <- numeric(n_games)
+  mu_vec[1] <- mu_hat  # initialize with global prior
+  
+  for (j in 2:n_games) {
+    games <- j - 1
+    X_j <- player_df$X[j]
+    mu_vec[j] <- mu + (.001/(.001+sigma2_hat)) * (ppp - mu_vec[j-1])
+  }
+  
+  nba_posterior[[i]]$mu_bij <- mu_vec
+}
+
+nba_posterior_all <- bind_rows(nba_posterior )
+
+sample_players <- nba_posterior_all %>%
   distinct(namePlayer) %>%
   slice_sample(n = 10) %>%
   pull(namePlayer)
 
-# Plot posterior mean over game number
-nba_posterior %>%
-  filter(namePlayer %in% sample_players) %>%
+nba_sample_df <- nba_posterior_all %>%
+  filter(namePlayer %in% sample_players)
+
+# Plot
+library(ggplot2)
+nba_sample_df %>%
   arrange(namePlayer, dateGame) %>%
   group_by(namePlayer) %>%
   mutate(game_number = row_number()) %>%
@@ -140,10 +182,10 @@ nba_posterior %>%
   labs(
     title = "Posterior Scoring Quality Over Time",
     x = "Game Number in Career",
-    y = expression(mu[bij]),
-    color = "Player"
+    y = expression(mu[bij])
   ) +
-  theme_minimal()
+  theme_minimal() +
+  theme(legend.position = "none")
 
 ```
 
@@ -156,7 +198,7 @@ nfl = read.csv('../data/12_field-goals.csv')
 head(nfl)
 
 model = glm(fg_made ~ ydl, data = nfl, family = binomial(link = "logit"))
-model_spline <- glm(fg_made ~ ns(ydl, df = 4),  # df = degrees of freedom
+model_spline <- glm(fg_made ~ bs(ydl, df = 4),  # df = degrees of freedom
                     data = nfl,
                     family = binomial(link = "logit"))
 summary(model)
