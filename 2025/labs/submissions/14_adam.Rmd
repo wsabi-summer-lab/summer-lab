@@ -1,0 +1,134 @@
+---
+title: "lab 14"
+output:
+  pdf_document: default
+  html_document: default
+date: "2025-06-23"
+---
+
+```{r setup, echo=FALSE,}
+#############
+### SETUP ###
+#############
+
+# install.packages(c("ggplot2", "rstan", "tidyverse"))
+library(ggplot2)
+library(rstan)
+library(tidyverse)
+
+# set seed
+set.seed(14)
+
+#################
+### NFL GAMES ###
+#################
+
+# load NFL games data from 2018-2023
+nfl_data = read_csv("../data/14_nfl-games.csv")
+# preview data
+head(nfl_data)
+
+team_levels <- sort(unique(c(nfl_data$home_team, nfl_data$away_team)))
+games <- nfl_data %>%
+  mutate(
+    H = as.integer(factor(home_team, levels = team_levels)),
+    A = as.integer(factor(away_team, levels = team_levels))
+  )
+
+season_levels <- sort(unique(games$season))
+games <- games %>%
+  mutate(
+    S = as.integer(factor(season, levels = season_levels))
+  )
+
+games <- games %>%
+  mutate(y = total_home_score - total_away_score)
+
+stan_data <- list(
+  N_games = nrow(games),
+  N_teams = length(team_levels),
+  N_seasons = length(season_levels),
+  y = games$y,
+  H = games$H,
+  A = games$A,
+  S = games$S
+)
+
+model = stan_model(file="14_adam.stan")
+
+fit = sampling(model, data = stan_data, iter = 1500, chains = 1, seed = 12345)
+
+team_levels <- sort(unique(c(games$home_team, games$away_team)))
+
+# Create a lookup table to match Stan team indices to team names
+team_lookup <- tibble(
+  team_index = 1:length(team_levels),
+  team_name = team_levels
+)
+
+posterior = rstan::extract(fit)
+
+alpha_summary <- posterior$alpha_team %>%
+  as.data.frame() %>%
+  setNames(paste0("team_", 1:ncol(.))) %>%
+  pivot_longer(cols = everything(), names_to = "team", values_to = "alpha") %>%
+  mutate(team_index = as.integer(str_remove(team, "team_"))) %>%
+  left_join(team_lookup, by = "team_index") %>%
+  group_by(team_name) %>%
+  summarise(
+    mean = mean(alpha),
+    lower = quantile(alpha, 0.025),
+    upper = quantile(alpha, 0.975)
+  ) %>%
+  mutate(team_name = fct_reorder(team_name, mean))  # order by HFA
+
+ggplot(alpha_summary, aes(x = mean, y = team_name)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = lower, xmax = upper), height = 0.2) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray") +
+  labs(title = "Team-Specific Home Field Advantage",
+       x = "Posterior Mean and 95% Credible Interval",
+       y = "Team") +
+  theme_minimal()
+
+
+```
+
+intervals are massive, but appears dallas has best HFA and arizona has the worst, which kinda makes sense
+
+
+```{r, echo = FALSE}
+betas_array <- posterior$betas  # [team, season, draw] — might need aperm
+
+# If needed, permute so it's draws x teams x seasons
+if (length(dim(betas_array)) == 3 && dim(betas_array)[3] < dim(betas_array)[1]) {
+  betas_array <- aperm(betas_array, c(3, 1, 2))  # draws x teams x seasons
+}
+
+# Focus on 2023 season (index 6)
+strength_summary <- as.data.frame(betas_array[,,6]) %>%
+  setNames(paste0("team_", 1:ncol(.))) %>%
+  pivot_longer(cols = everything(), names_to = "team", values_to = "strength") %>%
+  mutate(team_index = as.integer(str_remove(team, "team_"))) %>%
+  left_join(team_lookup, by = "team_index") %>%
+  group_by(team_name) %>%
+  summarise(
+    mean = mean(strength),
+    lower = quantile(strength, 0.025),
+    upper = quantile(strength, 0.975)
+  ) %>%
+  mutate(team_name = fct_reorder(team_name, mean))
+
+
+
+ggplot(strength_summary, aes(x = mean, y = team_name)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = lower, xmax = upper), height = 0.2) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray") +
+  labs(title = "Team Strength Estimates (2023 Season)",
+       x = "Posterior Mean and 95% Credible Interval",
+       y = "Team") +
+  theme_minimal()
+
+```
+besides the legendary NA, Carolina was really strong... is that right? there are very wide intervals still so that could be an issue. denver is bad it seems
