@@ -1,0 +1,193 @@
+---
+title: "13_Noah"
+author: '38880242'
+date: "2025-06-20"
+output: html_document
+---
+#############
+### SETUP ###
+#############
+
+# install.packages(c("ggplot2", "tidyverse"))
+library(ggplot2)
+library(tidyverse)
+
+# set seed
+set.seed(13)
+
+####################
+### GOLF PUTTING ###
+####################
+
+# load training data (first half of season)
+# preview data
+head(putts_train)
+
+```{r}
+
+putts_train = read_csv("~/Documents/GitHub/summer-lab/2025/labs/data/13_putts-train.csv")
+
+k <- nrow(putts_train)
+X <- putts_train$X
+N <- putts_train$N
+H <- putts_train$H  # number of makes in first half
+H <- X * N  
+
+p_mean <- rep(mean(X), k
+p_mle  <- X              
+
+
+C      <- mean(X) * (1 - mean(X))             
+tilde1 <- X / sqrt(C / N)              
+m1     <- mean(tilde1)
+S2_1   <- sum((tilde1 - m1)^2)
+sh1    <- 1 - (k - 2) / S2_1               
+theta1 <- m1 + sh1 * (tilde1 - m1)      
+p_em1  <- theta1 * sqrt(C / N)               
+
+
+Ttilde <- asin( sqrt((H + 3/8) / (N + 3/4)) )     
+nu     <- 1 / (2 * sqrt(N))                  
+tilde2 <- Ttilde / nu                          
+m2     <- mean(tilde2)
+S2_2   <- sum((tilde2 - m2)^2)
+sh2    <- 1 - (k - 2) / S2_2
+theta2 <- m2 + sh2 * (tilde2 - m2)          
+p_em2  <- sin(nu * theta2)^2                    
+
+mu_hat   <- mean(X)
+tau2_hat <- var(X) - C * mean(1 / N)
+tau2_hat <- pmax(tau2_hat, 0)                  
+w1       <- tau2_hat / (tau2_hat + C / N)
+p_eb1    <- mu_hat + w1 * (X - mu_hat)         
+
+Tvec     <- Ttilde                          
+nu2      <- nu
+mu_tilde <- mean(Tvec)
+tau2_t   <- var(Tvec) - mean(nu2^2)
+tau2_t   <- pmax(tau2_t, 0)
+w2       <- tau2_t / (tau2_t + nu2^2)
+theta_t  <- mu_tilde + w2 * (Tvec - mu_tilde)    
+p_eb2    <- sin(theta_t)^2                      
+
+
+results <- data.frame(
+  p_mean, p_mle,
+  p_em1,  p_em2,
+  p_eb1,  p_eb2
+)
+
+head(results)
+
+```
+```{r}
+# —————————————————————————————
+# 0. Load & merge train/test
+# —————————————————————————————
+putts_train = read_csv("~/Documents/GitHub/summer-lab/2025/labs/data/13_putts-train.csv")
+putts_test = read_csv("~/Documents/GitHub/summer-lab/2025/labs/data/13_putts-test.csv")
+
+# rename test X → X2 (second‐half percentage)
+names(putts_test)[names(putts_test)=="X"] <- "X2"
+
+df <- merge(putts_train, putts_test, by = "Player")
+
+
+k  <- nrow(df)
+X  <- df$X         
+N  <- df$N           
+H  <- X * N         
+X2 <- df$X2         
+
+
+p_mean <- rep(mean(X), k)
+p_mle  <- X
+
+C      <- mean(X) * (1 - mean(X))
+tilde1 <- X / sqrt(C / N)
+m1     <- mean(tilde1)
+S2_1   <- sum((tilde1 - m1)^2)
+sh1    <- 1 - (k - 2) / S2_1
+theta1 <- m1 + sh1 * (tilde1 - m1)
+p_em1  <- theta1 * sqrt(C / N)
+
+Ttilde <- asin( sqrt((H + 3/8) / (N + 3/4)) )
+nu     <- 1 / (2 * sqrt(N))
+tilde2 <- Ttilde / nu
+m2     <- mean(tilde2)
+S2_2   <- sum((tilde2 - m2)^2)
+sh2    <- 1 - (k - 2) / S2_2
+theta2 <- m2 + sh2 * (tilde2 - m2)
+p_em2  <- sin(nu * theta2)^2
+
+mu_hat   <- mean(X)
+tau2_hat <- var(X) - C * mean(1 / N)
+tau2_hat <- pmax(tau2_hat, 0)
+w1       <- tau2_hat / (tau2_hat + C / N)
+p_eb1    <- mu_hat + w1 * (X - mu_hat)
+
+mu_tilde <- mean(Ttilde)
+tau2_t   <- var(Ttilde) - mean(nu^2)
+tau2_t   <- pmax(tau2_t, 0)
+w2       <- tau2_t / (tau2_t + nu^2)
+theta_t  <- mu_tilde + w2 * (Ttilde - mu_tilde)
+p_eb2    <- sin(theta_t)^2
+
+
+mse_mean <- mean((p_mean - X2)^2)
+mse_mle  <- mean((p_mle  - X2)^2)
+mse_em1  <- mean((p_em1  - X2)^2)
+mse_em2  <- mean((p_em2  - X2)^2)
+mse_eb1  <- mean((p_eb1  - X2)^2)
+mse_eb2  <- mean((p_eb2  - X2)^2)
+
+mse_df <- data.frame(
+  estimator = c("Mean", "MLE", "EM1", "EM2", "EB1", "EB2"),
+  MSE       = c(mse_mean, mse_mle, mse_em1, mse_em2, mse_eb1, mse_eb2)
+)
+mse_df <- mse_df[order(mse_df$MSE), ]
+
+print(mse_df)
+
+```
+
+```{r}
+
+library(ggplot2)
+library(tidyr)
+
+plot_df <- data.frame(
+  X2       = X2,     
+  Mean     = p_mean,
+  MLE      = p_mle,
+  EM1      = p_em1,
+  EM2      = p_em2,
+  EB1      = p_eb1,
+  EB2      = p_eb2
+)
+
+plot_long <- pivot_longer(
+  plot_df,
+  cols      = -X2,
+  names_to  = "Estimator",
+  values_to = "Prediction"
+)
+
+ggplot(plot_long, aes(x = Prediction, y = X2, color = Estimator)) +
+  geom_point(alpha = 0.6, size = 1.8) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  labs(
+    x     = "Predicted Putting %",
+    y     = "Observed 2nd-Half Putting %",
+    color = "Estimator",
+    title = "Estimator Predictions vs. 2nd-Half Observations"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+```
+
+
+# load test data (second half of season)
+# preview data
+head(putts_test)
