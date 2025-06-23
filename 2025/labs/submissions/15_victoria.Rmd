@@ -14,14 +14,10 @@ head(nba_lineups)
 15.1.4 1 - One hot encode players in the dataset 
 
 ```{r}
-extract_ids <- function(player_string) {
-  regmatches(player_string, gregexpr("\\d{7}", player_string))[[1]]
-}
-
 nba_lineups_fast <- nba_lineups %>%
   mutate(
-    home_ids = str_extract_all(lineup_team, "\\d{7}"),
-    away_ids = str_extract_all(lineup_opp, "\\d{7}"),
+    home_ids = str_extract_all(lineup_team, "\\d+"),
+    away_ids = str_extract_all(lineup_opp, "\\d+"),
     all_ids  = map2(home_ids, away_ids, ~ unique(c(.x, .y))),
     row_id   = row_number()
   )
@@ -160,13 +156,8 @@ print(c(OLS = rmse_ols, Ridge = rmse_ridge))
 ```
 
 ```{r}
-setdiff(nba_lineups_fast$row_id, one_hot$row_id)
-```
-```{r}
-install.packages("caret")
-```
-```{r}
 df_pred <- data.frame(
+  player_id = rownames(X_test),
   actual = y_test,
   ols = y_pred_ols,
   ridge = as.vector(y_pred_ridge)
@@ -174,8 +165,6 @@ df_pred <- data.frame(
 
 df_pred_long <- df_pred %>%
   pivot_longer(cols = c("ols", "ridge"), names_to = "model", values_to = "predicted")
-
-
 
 ggplot(df_pred_long, aes(x = actual, y = predicted, color = model)) +
   geom_point(alpha = 0.3) +
@@ -186,5 +175,80 @@ ggplot(df_pred_long, aes(x = actual, y = predicted, color = model)) +
   ) +
   theme_minimal() +
   scale_color_manual(values = c("ols" = "lightblue3", "ridge" = "lightcoral"))
+```
+
+Visualize players' avg pts per poessession and comapre to models
+```{r}
+#data preparation to merge on row_id to reincorporate players back into data 
+row_ids <- nba_encoded$row_id
+row_ids_test <- row_ids[-train_idx]
+
+player_map <- nba_lineups_fast %>%
+  select(row_id, all_ids) %>%
+  mutate(player_id = sapply(all_ids, function(x) paste(x, collapse = ","))) %>%
+  select(row_id, player_id)
+
+
+# Join player info back to test predictions
+df_pred <- data.frame(
+  row_id = row_ids_test,
+  actual = y_test,
+  ols = y_pred_ols,
+  ridge = as.vector(y_pred_ridge)
+) %>%
+  left_join(player_map, by = "row_id") %>% 
+  separate_rows(player_id, sep = ",")
+
+head(df_pred)
+
+```
+
+```{r}
+#group by
+df_pred_grouped <- df_pred %>% 
+  group_by(player_id) %>%
+  summarise(
+    mean_actual = mean(actual, na.rm = TRUE),
+    mean_ols = mean(ols, na.rm = TRUE),
+    mean_ridge = mean(ridge, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+ggplot(df_pred_grouped, aes(x = mean_actual, y = mean_ols, color = "OLS")) +
+  geom_point(alpha = 0.5) +
+  geom_point(aes(x = mean_actual, y = mean_ridge, color = "Ridge"), alpha = 0.5) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "black") +
+  labs(
+    title = "Average Points per Possession: Actual vs OLS and Ridge Predictions",
+    x = "Actual Points per Possession",
+    y = "Predicted Points per Possession"
+  ) +
+  scale_color_manual(values = c("OLS" = "lightblue3", "Ridge" = "lightcoral")) +
+  theme_minimal()
+```
+
+We can see that the ridge estimator is much more accurate and likely more sensitive to the data, whereas the OLS almost predicts the same amount for most players
+
+```{r}
+#histogram for random sample of 10 players
+sample_players <- sample(unique(df_pred_grouped$player_id), 10)
+
+sample_data <- df_pred_grouped %>%
+  filter(player_id %in% sample_players)
+
+ggplot(sample_data) +
+  geom_col(aes(x = player_id, y = mean_actual, fill = "Actual"),  alpha = 0.8, width = 0.4) +
+  geom_col(aes(x = player_id, y = mean_ols, fill = "OLS"), alpha = 0.6, width = 0.4) +
+  geom_col(aes(x = player_id, y = mean_ridge, fill = "Ridge"), alpha = 0.6, width = 0.4) +
+  labs(
+    title = "Predicted vs Actual Points per Possession by Player",
+    x = "Player ID",
+    y = "Points per Possession"
+  ) +
+  scale_fill_manual(name = "Model", values = c("Actual" = "black", "OLS" = "darkturquoise", "Ridge" = "deeppink")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(legend)
+  
 ```
 
