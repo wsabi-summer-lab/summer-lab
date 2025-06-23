@@ -81,10 +81,10 @@ y <- nba_design$pts_poss
 
 lambdas <- 10^seq(-3, 3, by = 0.2)
 
-ridge_model <- cv.glmnet(
+ridge_model <- cv.glmnet(  # also takes a while to run
   x = X,
   y = y,
-  alpha = 0,                # Ridge regression
+  alpha = 0,
   lambda = lambdas,
   nfolds = 5,
   standardize = FALSE
@@ -102,24 +102,60 @@ plot(ridge_model)
 ols_coefs <- tidy(ols_model) %>%
   select(term, estimate) %>%
   rename(ols = estimate)
+ols_coefs$term <- gsub("`", "", ols_coefs$term)
 
 # tidy ridge coefs
 ridge_coefs_df <- as.matrix(ridge_coefs) %>%
   as.data.frame() %>%
-  rownames_to_column("term") %>%
-  rename(ridge = `1`)
+  rownames_to_column("term")
+
+colnames(ridge_coefs_df)
+
+names(ridge_coefs_df)[2] <- "ridge"
 
 # join coefs
 combined_coefs <- full_join(ols_coefs, ridge_coefs_df, by = "term") %>%
   filter(term != "(Intercept)")  # optional: exclude intercept from plot
 
 # plot ridge vs. ols
-ggplot(combined_coefs, aes(x = ols, y = ridge)) +
-  geom_point(alpha = 0.5) +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+combined_coefs <- combined_coefs %>%
+  filter(term != "(Intercept)") %>%
+  filter(!is.na(ols), !is.na(ridge)) %>%
+  mutate(player = gsub("_off|_def", "", term))
+
+long_coefs <- combined_coefs %>%
+  select(player, ols, ridge) %>%
+  pivot_longer(cols = c(ols, ridge), names_to = "model", values_to = "coefficient")
+
+# wow thats a lot of players
+ggplot(long_coefs, aes(x = coefficient, y = reorder(player, coefficient), fill = model)) +
+  geom_col(position = "dodge") +
   labs(
-    title = "Ridge vs OLS Coefficients",
-    x = "OLS Coefficient",
-    y = "Ridge Coefficient"
+    title = "OLS vs Ridge Coefficients by Player",
+    x = "Coefficient",
+    y = "Player"
   ) +
-  theme_minimal()
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 7)  # adjust for readability
+  )
+
+# 20 random players
+sample_players <- combined_coefs %>%
+  distinct(player) %>%
+  slice_sample(n = 20)
+
+long_coefs_sample <- combined_coefs %>%
+  filter(player %in% sample_players$player) %>%
+  select(player, ols, ridge) %>%
+  pivot_longer(cols = c(ols, ridge), names_to = "model", values_to = "coefficient")
+
+ggplot(long_coefs_sample, aes(x = coefficient, y = reorder(player, coefficient), fill = model)) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "Sample of 20 Players: OLS vs Ridge Coefficients",
+    x = "Coefficient",
+    y = "Player"
+  ) +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 7))
