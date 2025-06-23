@@ -1,0 +1,190 @@
+---
+title: "Lab 15 - Regularization"
+output: html_notebook
+---
+
+Read in data
+```{r}
+library(tidyverse)
+library(ggplot2)
+nba_lineups = readRDS("../data/15_nba-lineups.rds")
+head(nba_lineups)
+```
+
+15.1.4 1 - One hot encode players in the dataset 
+
+```{r}
+extract_ids <- function(player_string) {
+  regmatches(player_string, gregexpr("\\d{7}", player_string))[[1]]
+}
+
+nba_lineups_fast <- nba_lineups %>%
+  mutate(
+    home_ids = str_extract_all(lineup_team, "\\d{7}"),
+    away_ids = str_extract_all(lineup_opp, "\\d{7}"),
+    all_ids  = map2(home_ids, away_ids, ~ unique(c(.x, .y))),
+    row_id   = row_number()
+  )
+
+long_ids <- nba_lineups_fast %>%
+  select(row_id, all_ids) %>%
+  unnest(all_ids, keep_empty=TRUE)
+
+one_hot <- long_ids %>%
+  mutate(value = 1) %>%
+  pivot_wider(names_from = all_ids, values_from = value, values_fill = 0, names_prefix = "player_") 
+
+nba_encoded <- nba_lineups_fast %>%
+  left_join(one_hot, by = "row_id")
+
+```
+
+
+2 - fit with OLS 
+
+```{r}
+
+one_hot_input <- one_hot %>% 
+  select(-row_id)
+
+ols_model <- lm(pts_poss ~ . -1 , data = cbind(pts_poss = nba_encoded$pts_poss, one_hot_input))
+```
+
+
+```{r}
+summary(ols_model)
+```
+3 - Ridge model
+```{r}
+library ( glmnet )
+# set lambdas to cross−validate
+X <- as.matrix(one_hot_input)
+
+# 2. Response vector
+y <- nba_encoded$pts_poss
+
+# 3. Define lambda grid
+lambdas <- 10^seq(-3, 3, by = 0.2)
+
+# 4. Fit ridge regression model (alpha = 0)
+ridge_model <- cv.glmnet(
+  x = X,
+  y = y,
+  nfolds = 5,
+  alpha = 0,              # ridge
+  family = "gaussian",
+  lambda = lambdas,
+  standardize = TRUE
+)
+
+# 5. Output the best lambda
+ridge_model$lambda.min
+
+# 6. Plot cross-validation curve
+plot(ridge_model)
+```
+```{r}
+
+ols_df <- coef(ols_model) %>%
+  as.data.frame() %>%
+  rownames_to_column("player_id") %>%
+  rename(coefficient = 2) %>%
+  filter(player_id != "(Intercept)") %>%
+  mutate(model = "OLS")
+  
+```
+
+4 - Visualize the two models 
+```{r}
+ridge_coef <- coef(ridge_model, s = "lambda.min")
+
+ridge_df <- coef(ridge_model, s = "lambda.min") %>%
+  as.matrix() %>%
+  as.data.frame() %>%
+  rownames_to_column("player_id") %>%
+  rename(coefficient = 2) %>%
+  filter(player_id != "(Intercept)") %>%
+  mutate(model = "Ridge")
+
+combined_df <- bind_rows(ols_df, ridge_df)
+
+top_players <- combined_df %>%
+  group_by(player_id) %>%
+  summarise(avg_coef = mean(coefficient)) %>%
+  arrange(desc(avg_coef)) %>%
+  slice(1:15) %>%
+  pull(player_id)
+
+plot_df <- combined_df %>%
+  filter(player_id %in% top_players) %>%
+  mutate(player_id = factor(player_id, levels = rev(top_players)))
+
+ggplot(plot_df, aes(x = player_id, y = coefficient, fill = model)) +
+  geom_col(position = position_dodge(width = 0.7)) +
+  coord_flip() +
+  labs(
+    title = "Player Coefficients: OLS vs Ridge Regression",
+    x = "Player ID",
+    y = "Estimated Effect on Points per Possession"
+  ) +
+  scale_fill_manual(values = c("OLS" = "lightblue4", "Ridge" = "lightcoral")) +
+  theme_minimal()
+
+```
+
+```{r}
+library(caret)
+#out of sample performance
+set.seed(12345)  # reproducible split
+
+n <- nrow(X)
+train_idx <- sample(seq_len(n), size = 0.8 * n)
+
+X_train <- X[train_idx, ]
+X_test  <- X[-train_idx, ]
+y_train <- y[train_idx]
+y_test  <- y[-train_idx]
+
+#ols
+ols_model <- lm(y_train ~ X_train - 1)  # remove intercept
+y_pred_ols <- as.vector(predict(ols_model, newdata = as.data.frame(X_test)))
+
+#ridge 
+ridge_model <- cv.glmnet(X_train, y_train, alpha = 0, nfolds = 5)
+y_pred_ridge <- predict(ridge_model, newx = X_test, s = "lambda.min")
+
+rmse_ols <- RMSE(y_pred_ols, y_test)
+rmse_ridge <- RMSE(y_pred_ridge, y_test)
+
+print(c(OLS = rmse_ols, Ridge = rmse_ridge))
+```
+
+```{r}
+setdiff(nba_lineups_fast$row_id, one_hot$row_id)
+```
+```{r}
+install.packages("caret")
+```
+```{r}
+df_pred <- data.frame(
+  actual = y_test,
+  ols = y_pred_ols,
+  ridge = as.vector(y_pred_ridge)
+)
+
+df_pred_long <- df_pred %>%
+  pivot_longer(cols = c("ols", "ridge"), names_to = "model", values_to = "predicted")
+
+
+
+ggplot(df_pred_long, aes(x = actual, y = predicted, color = model)) +
+  geom_point(alpha = 0.3) +
+  labs(
+    title = "Out-of-Sample Predicted vs Actual Points per Possession",
+    x = "Actual",
+    y = "Predicted"
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = c("ols" = "lightblue3", "ridge" = "lightcoral"))
+```
+

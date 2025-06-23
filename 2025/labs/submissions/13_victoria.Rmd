@@ -92,8 +92,8 @@ putting <- putting %>%
     Xi_tilde_6_bar = mean(Xi_tilde_6),
     Sx2_6 = sum((Xi_tilde_6 - Xi_tilde_6_bar)^2)/(k-1),
     new_tau2 = Sx2_6 - mean(nu_i2),
-    theta_em2_hat = Xi_tilde_6_bar + (new_tau2/(new_tau2+nu_i2))*(Xi_tilde_6-Xi_tilde_6_bar),
-    p6 = sin(theta_em2_hat)^2
+    theta_em2_hat = Xi_tilde_6_bar + (new_tau2/(new_tau2+nu_i2))*(Xi_tilde_6 - Xi_tilde_6_bar),
+    p6 = (sin(theta_em2_hat))^2
   )
 
 putting_cleaned <- putting %>% 
