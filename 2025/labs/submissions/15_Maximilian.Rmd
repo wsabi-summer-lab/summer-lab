@@ -1,0 +1,163 @@
+---
+title: "15 Ridge"
+author: "Maximilian J. Gebauer"
+date: "2025-06-23"
+output: html_document
+---
+
+```{r Setup, include=FALSE, results='hide', warning=FALSE}
+knitr::opts_chunk$set(echo = T, fig.width=8, fig.height=4)
+options(scipen = 0, digits = 3)  # controls base R output
+
+# Package setup
+if(!require("pacman")) install.packages("pacman")
+
+pacman::p_load(tidyverse, dplyr, ggthemes, data.table, lubridate, glmnet,
+               GGally, RColorBrewer, ggsci, plotROC, usmap,
+               plotly, ggpubr, vistime, coefplot, skimr, car, ggrepel, slider, lubridate,
+               tidymodels,ranger,vip,ggplot2, tune,dials,pdp, purrr, stringr, lmtest,
+               sandwich, rstan)
+```
+
+
+Overview: we create a NBA adjusted plus minus (APM) model that estimates each player's impact on their team's offensive and defensive performance. Our raw data is row-indexed by play and gives the outcome (in points) and the 5-man Offensive lineup and the 5-man Defensive lineup. To set up this model we split each play into two rows, one for the offense lineup where the outcome is raw pts outcome, and one for the defensive lineup where the response is the negative of the pts outcome for that play. We one-hot encode players in a design matrix. We then use the glmnet package to fit an unpenalized OLS model (lambda = 0) and use the cv.glment function to tune lambda using 5-fold cross validation in a RIDGE version of the APM model where we then refit on trainng data with the cv-lambda with lowest 5-fold MSE. We employ an 80-20 train-test split, train both models on the training data, and plot the top 30 players by estimated APM for both models. We then compute the test MSE on the held out data to compare OOS performance. 
+
+
+Results: the plots of top APM players for the two models are vastly distinct. The RIDGE model returns prima facie reasonable results, including MVP-calliber players like Jokic, SGA, and Damian Lillard as top players, whereas the OLS model suggests that various replacement-level players are in the top-30, suggesting overfitting to small-sample noise (e.g., overfitting to players with few observations who by change did well over the short stretch). The overfitting concern appears to be born out in the test MSE comparison, with the RIDGE model having lower test MSE than the OLS model, suggesting a better overall bias-variance profile for Ridge in this case, e.g. the increase in expected bias appears to have been more than compensated for by the decrease in variance in the coeficcient estimates.
+
+
+```{r}
+nba <- readRDS("/Users/maximiliangebauer/Documents/summer-lab/2025/labs/data/15_nba-lineups.rds")
+```
+
+
+```{r}
+nba_long <- nba %>% 
+  mutate(play_id = row_number()) %>%                 
+  select(play_id, pts_poss, lineup_team, lineup_opp) %>% 
+  pivot_longer(
+    cols      = c(lineup_team, lineup_opp),
+    names_to  = "side",
+    values_to = "lineup"
+  ) %>% 
+  mutate(
+    pts_adj = if_else(side == "lineup_team",  pts_poss,  -pts_poss)
+  )
+```
+
+```{r}
+nba_players <- nba_long %>% 
+  separate_rows(lineup, sep = ",\\s*") %>%
+  mutate(
+    player_id = (lineup)
+  ) %>% 
+  select(play_id, pts_adj, player_id)
+```
+
+```{r}
+nba_matrix <- nba_players %>% 
+  mutate(value = 1) %>%                               
+  pivot_wider(
+    id_cols      = c(play_id, pts_adj),                          
+    names_from   = player_id,
+    values_from  = value,
+    values_fill  = 0
+  ) %>% 
+  left_join(
+    nba_players %>% distinct(play_id, pts_adj),      
+    by = c("play_id","pts_adj")
+  )
+```
+
+```{r}
+nba_matrix <- nba_matrix %>% select(-play_id)
+```
+
+```{r}
+X <- model.matrix(pts_adj ~ ., data = nba_matrix)
+y <- nba_matrix$pts_adj
+```
+
+```{r}
+set.seed(15)
+n    <- nrow(X)
+idx  <- sample.int(n, size = floor(0.80 * n))
+
+X_train <- X[idx, , drop = FALSE]
+y_train <- y[idx]
+
+X_test  <- X[-idx, , drop = FALSE]
+y_test  <- y[-idx]
+```
+
+```{r}
+fit_ols_train <- glmnet::glmnet(X_train, y_train, family = "gaussian", alpha = 0, lambda = 0, standardize = FALSE)
+```
+
+```{r}
+ols_coefs <- as.matrix(coef(fit_ols_train))            
+coef_df <- tibble(
+  term     = rownames(ols_coefs),
+  estimate = as.numeric(ols_coefs)
+) %>% 
+  filter(term != "(Intercept)") %>%                  # drop intercept
+  arrange(desc(estimate)) %>%                        # best → worst
+  slice_head(n = 30) %>%                             # top 30
+  mutate(term = fct_reorder(term, estimate))
+
+# 2.  plot
+ggplot(coef_df, aes(x = estimate, y = term)) +
+  geom_point(size = 2) +
+  geom_vline(xintercept = 0, linetype = "dashed", colour = "grey60") +
+  labs(title = "Top-30 OLS APM Coefficients", x = "Coefficient", y = NULL) +
+  theme_bw() +
+  theme(panel.grid.minor = element_blank())
+```
+
+```{r}
+set.seed(15)
+lambdas <- 10^seq(-3, 3, by = 0.2)
+ridge_cv <- glmnet::cv.glmnet(X_train, y_train, nfolds = 5, fmaily = "gaussian", lambda = lambdas, alpha = 0, standardize = F)
+plot(ridge_cv)
+```
+
+```{r}
+lambda_min <- ridge_cv$lambda.min
+
+fit_ridge <- glmnet::glmnet(X_train,y_train,family="gaussian", lambda = lambda_min, alpha = 0, standardize = F)
+```
+
+```{r}
+ridge_coefs <- as.matrix(coef(fit_ridge))            # rownames = terms
+coef_df <- tibble(
+  term     = rownames(ridge_coefs),
+  estimate = as.numeric(ridge_coefs)
+) %>% 
+  filter(term != "(Intercept)") %>%                  # drop intercept
+  arrange(desc(estimate)) %>%                        # best → worst
+  slice_head(n = 30) %>%                             # top 30
+  mutate(term = fct_reorder(term, estimate))
+
+# 2.  plot
+ggplot(coef_df, aes(x = estimate, y = term)) +
+  geom_point(size = 2) +
+  geom_vline(xintercept = 0, linetype = "dashed", colour = "grey60") +
+  labs(title = "Top-30 Ridge APM Coefficients", x = "Coefficient", y = NULL) +
+  theme_bw() +
+  theme(panel.grid.minor = element_blank())
+```
+
+```{r}
+pred_ols   <- predict(fit_ols_train,  newx = X_test, s = 0)
+pred_ridge <- predict(fit_ridge,      newx = X_test, s = lambda_min)
+
+mse_ols   <- mean((y_test - pred_ols  )^2)
+mse_ridge <- mean((y_test - pred_ridge)^2)
+
+options(digits = 6)
+
+tibble(model = c("OLS", "Ridge"),
+       mse   = c(mse_ols, mse_ridge))
+```
+ 
+
