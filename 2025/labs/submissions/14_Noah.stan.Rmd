@@ -1,0 +1,210 @@
+---
+title: "14_Noah"
+author: '38880242'
+date: "2025-06-20"
+output: html_document
+---
+
+#############
+### SETUP ###
+#############
+
+# install.packages(c("ggplot2", "rstan", "tidyverse"))
+library(ggplot2)
+library(rstan)
+library(tidyverse)
+
+# set seed
+set.seed(14)
+
+#################
+### NFL GAMES ###
+#################
+
+```{r}
+# 3. Create a consistent team index
+teams <- nfl_data %>%
+  select(home_team, away_team) %>%
+  pivot_longer(everything(), values_to = "team") %>%
+  distinct(team) %>%
+  arrange(team) %>%
+  pull(team)
+
+# 4. Add indices and response
+nfl <- nfl_data %>%
+  mutate(
+    H = as.integer(factor(home_team, levels = teams)),       # home‐team index 1…J
+    A = as.integer(factor(away_team, levels = teams)),       # away‐team index 1…J
+    y = total_home_score - total_away_score                              # score differential
+  )
+
+# 5. Pack data for Stan
+stan_data <- list(
+  N = nrow(nfl),
+  J = length(teams),
+  H = nfl$H,
+  A = nfl$A,
+  y = nfl$y
+)
+
+# 6. Stan model: team strengths η[j], team‐specific HFA α[j], overall HFA μ, and HFA‐spread σ_α
+stan_code <- "
+data {
+  int<lower=1> N;                 // # games
+  int<lower=1> J;                 // # teams
+  int<lower=1,upper=J> H[N];      // home‐team idx
+  int<lower=1,upper=J> A[N];      // away‐team idx
+  vector[N] y;                    // home–away score diff
+}
+parameters {
+  vector[J] eta;                  // team strength
+  vector[J] alpha;                // team‐specific HFA
+  real mu_alpha;                  // overall HFA mean
+  real<lower=0> sigma_alpha;      // SD of team HFAs
+  real<lower=0> sigma;            // game‐level noise
+}
+model {
+  // Priors
+  eta            ~ normal(0, 5);
+  mu_alpha       ~ normal(0, 5);
+  sigma_alpha    ~ normal(0, 5);
+  alpha          ~ normal(mu_alpha, sigma_alpha);
+  sigma          ~ normal(0, 5);
+
+  // Likelihood
+  for (n in 1:N) {
+    y[n] ~ normal((eta[H[n]] - eta[A[n]]) + alpha[H[n]], sigma);
+  }
+}
+"
+
+# 7. Compile and fit the model
+fit <- stan(
+  model_code = stan_code,
+  data       = stan_data,
+  iter       = 2000,
+  chains     = 4,
+  cores      = 4
+)
+
+# 8. Inspect convergence and posterior summaries
+print(fit, pars = c("mu_alpha","sigma_alpha","sigma"), probs = c(0.025, 0.5, 0.975))
+```
+
+
+```{r}
+# 1. Load libraries
+library(rstan)
+library(tidyverse)
+
+# 2. Re-use your 'teams' vector and fitted non-centered model 'fit_nc'
+
+# 3. Extract the raw posterior draws for alpha (dimensions: draws × J)
+alpha_array <- rstan::extract(fit, pars = "alpha", permuted = TRUE)$alpha
+# alpha_array is a matrix with n_draws rows and J columns
+
+# 4. Turn into a long data frame with one row per draw × team
+alpha_df <- as_tibble(alpha_array)
+names(alpha_df) <- teams
+alpha_long <- alpha_df %>%
+  mutate(draw = row_number()) %>%
+  pivot_longer(
+    cols      = -draw,
+    names_to  = "team",
+    values_to = "hfa"
+  )
+
+# 5. Compute posterior summaries: mean and 95% credible interval
+hfa_summary <- alpha_long %>%
+  group_by(team) %>%
+  summarise(
+    mean_hfa  = mean(hfa),
+    lower_hfa = quantile(hfa, 0.025),
+    upper_hfa = quantile(hfa, 0.975)
+  ) %>%
+  arrange(desc(mean_hfa))
+
+# 6. Plot each team’s posterior mean ± 95% CI
+ggplot(hfa_summary, aes(x = reorder(team, mean_hfa), y = mean_hfa)) +
+  geom_errorbar(aes(ymin = lower_hfa, ymax = upper_hfa), width = 0.3) +
+  geom_point(size = 2) +
+  coord_flip() +
+  labs(
+    x     = "Team",
+    y     = "Posterior mean home-field advantage (pts)",
+    title = "Team-specific HFA (2018–2023)"
+  ) +
+  theme_minimal()
+
+# 7. Print the top-3 and bottom-3 franchises by posterior mean HFA
+top_3    <- slice_head(hfa_summary, n = 3)
+bottom_3 <- slice_tail(hfa_summary, n = 3)
+
+cat("\nTop 3 teams by HFA:\n")
+print(top_3)
+
+cat("\nBottom 3 teams by HFA:\n")
+print(bottom_3)
+
+```
+
+```{r}
+# 1. Load packages
+library(rstan)
+library(tidyverse)
+
+
+# 3. Extract the η draws (matrix: draws × J)
+eta_array <- rstan::extract(fit, pars = "eta", permuted = TRUE)$eta
+
+# 4. Put into a tibble with team names
+eta_df <- as_tibble(eta_array)
+colnames(eta_df) <- teams
+
+eta_long <- eta_df %>%
+  mutate(draw = row_number()) %>%
+  pivot_longer(
+    cols      = -draw,
+    names_to  = "team",
+    values_to = "strength"
+  )
+
+# 5. Compute posterior summaries
+strength_summary <- eta_long %>%
+  group_by(team) %>%
+  summarise(
+    mean_str   = mean(strength),
+    lower_str  = quantile(strength, 0.025),
+    upper_str  = quantile(strength, 0.975)
+  ) %>%
+  arrange(desc(mean_str))
+
+# 6. Plot means with 95% CIs
+ggplot(strength_summary, aes(x = reorder(team, mean_str), y = mean_str)) +
+  geom_errorbar(aes(ymin = lower_str, ymax = upper_str), width = 0.3) +
+  geom_point(size = 2) +
+  coord_flip() +
+  labs(
+    x     = "Team",
+    y     = "Posterior mean team strength (pts)",
+    title = "Team Strength Estimates (2018–2023)"
+  ) +
+  theme_minimal()
+
+# 7. Find the strongest and weakest
+top_3    <- slice_head(strength_summary,  n = 3)
+bottom_3 <- slice_tail(strength_summary, n = 3)
+
+cat("\nStrongest 3 teams by posterior mean strength:\n")
+print(top_3)
+
+cat("\nWeakest 3 teams by posterior mean strength:\n")
+print(bottom_3)
+
+```
+
+# load NFL games data from 2018-2023
+nfl_data = read_csv("/Users/noahsonnen/Documents/GitHub/summer-lab/2025/labs/data/14_nfl-games.csv")
+# preview data
+head(nfl_data)
+
