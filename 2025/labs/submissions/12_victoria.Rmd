@@ -128,36 +128,50 @@ nba_variance_posterior <- nba_variance %>%
     tau2_hat = best_tau2$tau2
   ) %>% 
   ungroup()
+
+nu2_hat <- nba_variance_posterior %>%
+  group_by(namePlayer) %>%
+  summarize(mean_X = mean(X, na.rm = TRUE)) %>%
+  summarize(nu2_hat = var(mean_X, na.rm = TRUE)) %>%
+  pull(nu2_hat)
+
+print(nu2_hat)
+
+mean(nba_variance_posterior$X, na.rm = TRUE)
   
 ```
 
 Plot 
 ```{r}
+
+set.seed(12345)
 nba_posterior <- nba_variance_posterior %>%
   arrange(namePlayer, dateGame) %>% 
   group_by(namePlayer) %>% 
   mutate(
-    ppp = pts/possessions,
     mu_bij = NA_real_,
     game_num = row_number()
-    w = 1 / (sigma2_hat + game_num * tau2_hat)
-  
   ) %>% 
-  group_split()
+  group_split(.keep=TRUE)
   
 for (i in seq_along(nba_posterior)) {
-  player_df <- nba_posterior[[i]]  # use [[i]] not [i]
+  player_df <- nba_posterior[[i]]
   n_games <- nrow(player_df)
-  
+  X_j <- player_df$pts[j] / player_df$possessions[j]
   mu_vec <- numeric(n_games)
-  mu_vec[1] <- mu_hat  # initialize with global prior
+
+  # First game: use global prior
+  mu_vec[1] <- ((player_df$pts[1] / (sigma2_hat * player_df$possessions[1])) + (mu_hat / nu2_hat)) /
+               ((1 / (sigma2_hat * player_df$possessions[1])) + (1 / nu2_hat))
   
-  for (j in 2:n_games) {
-    games <- j - 1
-    X_j <- player_df$X[j]
-    mu_vec[j] <- mu + (.001/(.001+sigma2_hat)) * (ppp - mu_vec[j-1])
+  # Subsequent games: update using previous mu_vec[j - 1]
+  if (n_games > 1) {
+    for (j in 2:n_games) {
+      mu_vec[j] <-mu_vec[j] <- (X_j / sigma2_hat + mu_vec[j - 1] / .001) /
+             (1 / sigma2_hat + 1 / .001)
+    }
   }
-  
+
   nba_posterior[[i]]$mu_bij <- mu_vec
 }
 
@@ -184,8 +198,7 @@ nba_sample_df %>%
     x = "Game Number in Career",
     y = expression(mu[bij])
   ) +
-  theme_minimal() +
-  theme(legend.position = "none")
+  theme_minimal() 
 
 ```
 

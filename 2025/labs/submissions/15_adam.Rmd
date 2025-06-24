@@ -1,0 +1,176 @@
+---
+title: "lab 15"
+output: pdf_document
+date: "2025-06-24"
+---
+
+```{r setup, include=FALSE}
+#############
+### SETUP ###
+#############
+
+# install.packages(c("ggplot2", "glmnet", "tidyverse"))
+library(ggplot2)
+library(glmnet)
+library(tidyverse)
+library(Matrix)
+
+# set seed
+set.seed(15)
+
+####################
+### NBA LINEUPS ###
+####################
+
+# load NBA lineups data
+nba_lineups = readRDS("../data/15_nba-lineups.rds")
+# preview data
+head(nba_lineups)
+```
+
+```{r, include=FALSE}
+
+
+nba_lineups_ext = nba_lineups %>%
+  mutate(
+    home_ids = str_extract_all(lineup_team, "\\d+"),
+    away_ids = str_extract_all(lineup_opp, "\\d+"),
+    all_ids  = map2(home_ids, away_ids, ~ unique(c(.x, .y))),
+    row_id   = row_number()
+  )
+
+long_ids = nba_lineups_ext %>%
+  select(row_id, all_ids) %>%
+  unnest(all_ids, keep_empty=TRUE)
+
+one_hot = long_ids %>%
+  mutate(value = 1) %>%
+  pivot_wider(names_from = all_ids, values_from = value, values_fill = 0, names_prefix = "player_") 
+
+nba_encoded = nba_lineups_ext %>%
+  left_join(one_hot, by = "row_id")
+
+one_hot = one_hot %>%
+  select(-row_id) 
+```
+
+OLS first
+```{r, message=FALSE, warning=FALSE}
+
+one_hot_pts = cbind(one_hot, pts = nba_lineups_ext$pts_poss) 
+
+ols_model = lm(pts ~ . + 0, data = one_hot_pts)
+
+
+
+```
+
+RIDGGGG
+```{r}
+lambdas = 10^seq(-3, 3, by = 0.2)
+ridge_model = cv.glmnet(
+  x = as.matrix(one_hot),
+  y = nba_lineups_ext$pts_poss,
+  alpha = 0,
+  lambda = lambdas,
+  nfolds = 5,
+  family = "gaussian",
+  standardize = FALSE
+)
+
+l_min = ridge_model$lambda.min
+
+```
+
+lets draw some stuf!
+
+```{r, echo = FALSE}
+# OLS: get player coefficients
+ols_coefs <- coef(ols_model)
+
+# Ridge: get player coefficients at best lambda
+ridge_coefs <- coef(ridge_model, s = ridge_model$lambda.min)
+
+# Remove intercept if present
+ols_df <- tibble(
+  player = names(ols_coefs),
+  effect_ols = as.vector(ols_coefs)
+)
+
+ridge_df <- tibble(
+  player = rownames(ridge_coefs),
+  effect_ridge = as.vector(ridge_coefs)
+) %>%
+  filter(player != "(Intercept)")
+coef_df <- left_join(ols_df, ridge_df, by = "player") %>%
+  mutate(player = str_remove(player, "player_"))  # clean player IDs
+
+ggplot(coef_df, aes(x = effect_ols, y = effect_ridge)) +
+  geom_point(alpha = 0.6) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+  labs(
+    title = "Player Effects: OLS vs Ridge",
+    x = "OLS Estimate",
+    y = "Ridge Estimate"
+  ) +
+  theme_minimal()
+```
+
+anotha one! - DJ Khaled
+
+```{r, echo = FALSE}
+top_players <- coef_df %>%
+  arrange(desc(effect_ridge)) %>%
+  slice(1:10)
+
+bottom_players <- coef_df %>%
+  arrange(effect_ridge) %>%
+  slice(1:10)
+
+top_bottom <- bind_rows(top_players, bottom_players)
+
+ggplot(top_bottom, aes(x = fct_reorder(player, effect_ridge), y = effect_ridge, fill = effect_ridge > 0)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  labs(
+    title = "Top and Bottom Players by Ridge APM",
+    x = "Player ID",
+    y = "Ridge Coefficient"
+  ) +
+  scale_fill_manual(values = c("red", "steelblue")) +
+  theme_minimal()
+
+```
+
+oops I did it again
+
+```{r, echo = FALSE}
+comparison_df <- top_bottom %>%
+  pivot_longer(
+    cols = c(effect_ols, effect_ridge),
+    names_to = "model",
+    values_to = "estimate"
+  ) %>%
+  mutate(
+    player = fct_reorder(player, estimate)  # reorders within facets
+  )
+
+ggplot(comparison_df, aes(x = player, y = estimate, fill = model)) +
+  geom_col(position = position_dodge(width = 0.7), width = 0.6) +
+  coord_flip() +
+  scale_fill_manual(values = c("effect_ols" = "gray60", "effect_ridge" = "steelblue"),
+                    labels = c("OLS", "Ridge")) +
+  labs(
+    title = "Top and Bottom Players: OLS vs Ridge APM",
+    x = "Player ID",
+    y = "Estimated Effect (Points per Possession)",
+    fill = "Model"
+  ) +
+  theme_minimal()
+
+```
+
+
+low k kinda wild that one. peace and love baby
+
+
