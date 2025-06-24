@@ -233,8 +233,6 @@ We can see that the ridge estimator is much more accurate and likely more sensit
 #histogram for random sample of 10 players
 sample_players <- sample(unique(df_pred_grouped$player_id), 10)
 
-sample_data <- df_pred_grouped %>%
-  filter(player_id %in% sample_players)
 
 ggplot(sample_data) +
   geom_col(aes(x = player_id, y = mean_actual, fill = "Actual"),  alpha = 0.8, width = 0.4) +
