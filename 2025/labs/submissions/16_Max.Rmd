@@ -1,0 +1,269 @@
+---
+title: "16 Bias Variance Tradeoff"
+author: "Maximilian J. Gebauer"
+date: "2025-06-24"
+output: html_document
+---
+
+```{r Setup, include=FALSE, results='hide', warning=FALSE}
+knitr::opts_chunk$set(echo = T, fig.width=8, fig.height=4)
+options(scipen = 0, digits = 3)  # controls base R output
+
+# Package setup
+if(!require("pacman")) install.packages("pacman")
+
+pacman::p_load(tidyverse, dplyr, ggthemes, data.table, lubridate, glmnet,
+               GGally, RColorBrewer, ggsci, plotROC, usmap,
+               plotly, ggpubr, vistime, coefplot, skimr, car, ggrepel, slider, lubridate,
+               tidymodels,ranger,vip,ggplot2, tune,dials,pdp, purrr, stringr, lmtest,
+               sandwich, rstan)
+```
+
+```{r}
+raw_data <- read.csv("/Users/maximiliangebauer/Documents/summer-lab/2025/labs/data/16_park-effects.csv")
+raw_sub <- raw_data %>%
+  select(OT_YR,DT_YR,PARK)
+
+raw_sub2 <- raw_sub %>%
+  mutate(
+    OT = str_remove(OT_YR, "\\d{4}$"),
+    DT = str_remove(DT_YR, "\\d{4}$")
+  ) %>%
+  select(-OT_YR, -DT_YR)                
+
+raw_sub2
+```
+
+```{r}
+set.seed(16)
+
+beta_0 <- 0.4
+
+Park_betas <- rnorm(30, mean = 0.04, sd = 0.065)
+ot_betas <- rnorm(30, mean = 0.02, sd = 0.045)
+dt_betas <- rnorm(30, mean = 0.03, sd = 0.07)
+
+park_levels <- unique(raw_sub2$PARK)
+ot_levels   <- unique(raw_sub2$OT)
+dt_levels   <- unique(raw_sub2$DT)
+
+names(Park_betas) <- park_levels
+names(ot_betas)   <- ot_levels
+names(dt_betas)   <- dt_levels
+
+sim_df <- raw_sub2 %>%
+  mutate(
+    beta0     = beta_0,
+    beta_park = Park_betas[PARK],
+    beta_ot   = ot_betas[OT],
+    beta_dt   = dt_betas[DT]
+  )
+
+sim_df
+```
+
+```{r}
+sim_df <- sim_df %>%
+  mutate(
+    response_mean = beta0 + beta_park + beta_ot + beta_dt
+  )
+head(sim_df)
+```
+
+```{r}
+library(truncnorm)
+
+set.seed(16)
+
+n <- nrow(sim_df)
+
+sim_matrix <- replicate(
+  100,
+  round(
+    rtruncnorm(n, a = 0, b = Inf, mean = sim_df$response_mean, sd = 1)
+  )
+)
+
+colnames(sim_matrix) <- paste0("sim_", seq_len(ncol(sim_matrix)))
+
+sim_df100 <- bind_cols(sim_df, as_tibble(sim_matrix))
+```
+
+```{r}
+head(sim_df100)
+```
+
+```{r}
+park_levels <- unique(sim_df100$PARK)
+
+park_effects_list <- vector("list", 100)
+
+for(i in seq_len(100)) {
+  sim_col <- paste0("sim_", i)
+  fmla <- as.formula(paste(sim_col, "~ factor(OT) + factor(DT) + factor(PARK)"))
+  
+  fit <- lm(fmla, data = sim_df100)
+  
+  td <- tidy(fit) %>%
+    filter(str_detect(term, "^factor\\(PARK\\)")) %>%
+    transmute(
+      park     = str_remove(term, "^factor\\(PARK\\)"),
+      estimate = estimate
+    )
+  
+  ref_park <- setdiff(park_levels, td$park)
+  td <- bind_rows(
+    td,
+    tibble(park = ref_park, estimate = 0)
+  )
+  
+  park_effects_list[[i]] <- td %>%
+    arrange(match(park, park_levels)) %>%
+    mutate(sim = i)
+}
+
+park_effects_all <- bind_rows(park_effects_list)
+```
+
+```{r}
+true_df <- tibble(
+  park = names(Park_betas),
+  true = as.numeric(Park_betas)
+)
+
+ggplot(park_effects_all, aes(x = park, y = estimate)) +
+  geom_jitter(width = 0.2, height = 0, alpha = 0.3, color = "steelblue") +
+  geom_point(
+    data    = true_df,
+    aes(x = park, y = true),
+    color   = "firebrick",
+    size    = 3
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(
+    x     = "Park",
+    y     = "Estimated Park Effect",
+    title = "True vs. Simulated Park Effects (100 sims)",
+    caption = "Blue = simulated estimates; red = true β"
+  )
+```
+
+```{r}
+X <- model.matrix(~ factor(OT) + factor(DT) + factor(PARK), data = sim_df100)
+
+all_parks <- unique(sim_df100$PARK)
+
+ridge_park_effects <- map_dfr(1:100, function(i) {
+  y <- sim_df100[[paste0("sim_", i)]]
+  
+  cvm <- cv.glmnet(
+    X, y,
+    alpha = 0,
+    nfolds = 5
+  )
+  best_lambda <- cvm$lambda.min
+  
+  fit <- glmnet(
+    X, y,
+    alpha = 0,
+    lambda = best_lambda
+  )
+  
+  co <- as.vector(coef(fit))
+  names(co) <- rownames(coef(fit))
+  
+  park_co <- co[grep("^factor\\(PARK\\)", names(co))]
+  df <- tibble(
+    park     = sub("^factor\\(PARK\\)", "", names(park_co)),
+    estimate = as.numeric(park_co)
+  )
+  
+  missing_park <- setdiff(all_parks, df$park)
+  if(length(missing_park) > 0) {
+    df <- bind_rows(df, tibble(park = missing_park, estimate = 0))
+  }
+  
+  df %>%
+    arrange(match(park, all_parks)) %>%
+    mutate(sim = i)
+})
+
+```
+
+```{r}
+true_df <- tibble(
+  park = names(Park_betas),
+  true = as.numeric(Park_betas)
+)
+
+ggplot(ridge_park_effects, aes(x = park, y = estimate)) +
+  geom_jitter(width = 0.2, height = 0, alpha = 0.3, color = "steelblue") +
+  geom_point(
+    data    = true_df,
+    aes(x = park, y = true),
+    color   = "firebrick",
+    size    = 3
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(
+    x     = "Park",
+    y     = "Ridge Estimated Park Effect",
+    title = "True vs. Simulated Park Effects (100 sims)",
+    caption = "Blue = simulated estimates; red = true β"
+  )
+```
+
+```{r}
+true_df <- tibble(
+  park = names(Park_betas),
+  true = as.numeric(Park_betas)
+)
+
+ols_avg_var <- park_effects_all %>%
+  group_by(park) %>%
+  summarise(
+    mean_ols = mean(estimate),
+    var_ols  = var(estimate),
+    .groups = "drop"
+  ) %>%
+  left_join(true_df, by = "park")
+
+ridge_avg_var <- ridge_park_effects %>%
+  group_by(park) %>%
+  summarise(
+    mean_ridge = mean(estimate),
+    var_ridge  = var(estimate),
+    .groups = "drop"
+  ) %>%
+  left_join(true_df, by = "park")
+
+
+beta_true    <- ols_avg_var %>% arrange(park) %>% pull(true)
+
+beta_hat_ols <- ols_avg_var %>% arrange(park) %>% pull(mean_ols)
+bias_ols  <- sqrt( sum((beta_true - beta_hat_ols)^2) )
+var_ols   <- sqrt( sum((ols_avg_var %>% arrange(park) %>% pull(var_ols))) )
+
+beta_hat_rdg <- ridge_avg_var %>% arrange(park) %>% pull(mean_ridge)
+bias_rdg  <- sqrt( sum((beta_true - beta_hat_rdg)^2) )
+var_rdg   <- sqrt( sum((ridge_avg_var %>% arrange(park) %>% pull(var_ridge))) )
+
+results <- tibble(
+  method     = c("OLS",    "Ridge"),
+  bias_l2    = c(bias_ols, bias_rdg),
+  var_l2     = c(var_ols,  var_rdg)
+)
+
+print(results)
+```
+
+Ridge has low estimated bias and variance than OLS
+
+
+

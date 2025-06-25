@@ -1,0 +1,229 @@
+---
+title: "Lab 16 - Bias and Variance Tradeoff"
+output: html_notebook
+---
+
+Task 1 - true parameter vector beta according to following distributions
+
+```{r}
+#load in data
+library(tidyverse)
+library(ggplot2)
+park_effects <- read_csv("../data/16_park-effects.csv")
+```
+
+```{r}
+beta0 = .4
+
+n_parks = length(unique(park_effects$PARK))
+n_off = length(unique(park_effects$OT_YR))
+n_def = length(unique(park_effects$DT_YR))
+
+beta_parks = rnorm(n_parks, mean = 0.04, sd = .065)
+beta_off = rnorm(n_off, mean = 0.02, sd = 0.045)
+beta_def = rnorm(n_def, mean = 0.03, sd = 0.07)
+
+beta = c(beta0, beta_parks, beta_off, beta_def)
+```
+
+2 - encode X matrix
+```{r}
+park_effects <- park_effects %>%
+  mutate(row_id = row_number())
+
+# One-hot encode PARK
+park_wide <- park_effects %>%
+  select(row_id, PARK) %>%
+  mutate(value = 1) %>%
+  pivot_wider(
+    names_from = PARK,
+    values_from = value,
+    values_fill = list(value = 0),
+    names_prefix = "PARK_"
+  )
+
+ot_wide <- park_effects %>%
+  select(row_id, OT_YR) %>%
+  mutate(value = 1) %>%
+  pivot_wider(
+    names_from = OT_YR,
+    values_from = value,
+    values_fill = list(value = 0),
+    names_prefix = "OT_"
+  )
+
+# One-hot encode DT_YR
+dt_wide <- park_effects %>%
+  select(row_id, DT_YR) %>%
+  mutate(value = 1) %>%
+  pivot_wider(
+    names_from = DT_YR,
+    values_from = value,
+    values_fill = list(value = 0),
+    names_prefix = "DT_"
+  ) 
+
+
+
+# Combine into full matrix X
+X <- park_wide %>%
+  left_join(ot_wide, by = "row_id") %>%
+  left_join(dt_wide, by = "row_id") %>%
+  mutate(Intercept = 1) %>%
+  select(row_id, Intercept, everything(), -row_id)
+  
+```
+ 
+3 - fit to betas
+```{r}
+library(truncnorm)
+n_sims = 100
+
+y_list <- vector("list", n_sims)
+
+beta <- as.numeric(beta)
+beta <- matrix(beta, ncol = 1)
+X <- as.matrix(X)
+
+for (m in 1:n_sims) {
+  mu <- X %*% beta  # linear predictor: n x 1 vector
+  y_m <- rtruncnorm(n, a = 0, mean = mu, sd = 1)  # Truncated Normal
+  y_list[[m]] <- round(y_m)  # Round to integer
+}
+```
+
+4 - fit OLS, Ridge, and LASSO regression
+```{r}
+#prepare empty matrices for all models 
+library(glmnet)
+
+beta_ols_mat <- matrix(NA, nrow = n_sims, ncol = n_parks)
+beta_ridge_mat <- matrix(NA, nrow = n_sims, ncol = n_parks)
+beta_lasso_mat <- matrix(NA, nrow = n_sims, ncol = n_parks)
+lambdas <- 10^seq(-3, 3, by = 0.2)
+
+#for loop to fit models
+for (m in 1:n_sims) {
+  y_m <- y_list[[m]]
+
+  # Fit OLS
+  model_ols <- lm(y_m ~ ., data = as.data.frame(X))
+  beta_ols_mat[m, ] <- coef(model_ols)[2:(n_parks + 1)]  # skip intercept
+
+  # Fit Ridge
+  model_ridge <- cv.glmnet(X, y_m, alpha = 0, lambda = lambdas)
+  ridge_coefs <- as.vector(coef(model_ridge, s = "lambda.min"))[-1]  # drop intercept
+  beta_ridge_mat[m, ] <- ridge_coefs[1:n_parks]
+
+  # Fit LASSO
+  model_lasso <- cv.glmnet(X, y_m, alpha = 1, lambda = lambdas)
+  lasso_coefs <- as.vector(coef(model_lasso, s = "lambda.min"))[-1]  # drop intercept
+  beta_lasso_mat[m, ] <- lasso_coefs[1:n_parks]
+}
+
+beta_ols_mat <- beta_ols_mat[1:50, 2:30] #adjustment since first column is NA
+
+```
+ 
+5 and 6 - get the bias and variance of the estimates
+
+```{r}
+
+beta_ols_mat <- beta_ols_mat[1:50, ]
+beta_ridge_mat <- beta_ridge_mat[1:50, ]
+beta_lasso_mat <- beta_lasso_mat[1:50, ]
+
+
+beta_ols_mean <- colMeans(beta_ols_mat)
+beta_ridge_mean <- colMeans(beta_ridge_mat)
+beta_lasso_mean <- colMeans(beta_lasso_mat)
+
+# Bias
+bias_ols <- sqrt(sum((beta_parks - beta_ols_mean)^2))
+bias_ridge <- sqrt(sum((beta_parks - beta_ridge_mean)^2))
+bias_lasso <- sqrt(sum((beta_parks - beta_lasso_mean)^2))
+
+bias = c(bias_ols, bias_ridge, bias_lasso)
+
+# Variance
+var_ols <- mean(apply(beta_ols_mat, 2, var))
+var_ridge <- mean(apply(beta_ridge_mat, 2, var))
+var_lasso <- mean(apply(beta_lasso_mat, 2, var))
+
+variance = c(var_ols, var_ridge, var_lasso)
+
+cat("Bias (OLS):", round(bias_ols, 4), "\n")
+cat("Bias (Ridge):", round(bias_ridge, 4), "\n")
+cat("Bias (LASSO):", round(bias_lasso, 4), "\n")
+cat("Variance (OLS):", round(var_ols, 4), "\n")
+cat("Variance (Ridge):", round(var_ridge, 4), "\n")
+cat("Variance (LASSO):", round(var_lasso, 4), "\n")
+
+bias_var_df <- tibble(
+  model = c("OLS", "Ridge", "LASSO"),
+  bias = bias,
+  variance = variance
+)
+
+ggplot(bias_var_df, aes(x = model, y = bias, fill = model)) +
+  geom_col() +
+  labs(
+    title = "Average Bias of Park Effect Estimates",
+    y = "Bias",
+    x = "Model"
+  ) +
+  scale_fill_manual(values = c("OLS" = "lightblue4", "Ridge" = "lightcoral", "LASSO" = "palegoldenrod")) +
+  theme_minimal()
+
+# Variance plot
+ggplot(bias_var_df, aes(x = model, y = variance, fill = model)) +
+  geom_col() +
+  labs(
+    title = "Average Variance of Park Effect Estimates",
+    y = "Variance",
+    x = "Model"
+  ) +
+  scale_fill_manual(values = c("OLS" = "lightblue4", "Ridge" = "lightcoral", "LASSO" = "palegoldenrod")) +
+  theme_minimal()
+
+```
+
+6 - Visualization
+```{r}
+boxplot(as.data.frame(beta_ols_mat), main = "OLS Park Effect Estimates", col = 'lightblue4')
+boxplot(as.data.frame(beta_ridge_mat), main = "Ridge Park Effect Estimates", col = 'lightcoral')
+boxplot(as.data.frame(beta_lasso_mat), main = "LASSO Park Effect Estimates", col = 'palegoldenrod')
+```
+We see that the OLS estimates are much more uniform across parks. Ridge and LASSO both show a good amount of variability however the LASSO estimates are generally more centered but with longer tails 
+
+We can also use density plots to visualize
+```{r}
+
+beta_df <- bind_rows(
+  as.data.frame(beta_ols_mat) %>% pivot_longer(everything(), names_to = "park", values_to = "coef") %>% mutate(model = "OLS"),
+  as.data.frame(beta_ridge_mat) %>% pivot_longer(everything(), names_to = "park", values_to = "coef") %>% mutate(model = "Ridge"),
+  as.data.frame(beta_lasso_mat) %>% pivot_longer(everything(), names_to = "park", values_to = "coef") %>% mutate(model = "LASSO")
+)
+
+ggplot(beta_df, aes(x = coef, fill = model)) +
+  geom_density(alpha = 0.4) +
+  facet_wrap(~ park, scales = "free") +
+  labs(title = "Density of Park Effect Estimates", x = "Estimated Coefficient", y = "Density") +
+  theme_minimal()+
+  scale_fill_manual(values = c("OLS" = "lightblue4", "Ridge" = "lightcoral", "LASSO" = 'palegoldenrod')) 
+```
+
+We can also look at violin plots of the coeffs 
+
+```{r}
+ggplot(beta_df, aes(x = model, y = coef, fill = model)) +
+  geom_violin(alpha = 0.5) +
+  facet_wrap(~ park, scales = "free_y") +
+  labs(title = "Violin Plots of Park Coefficients by Model") +
+  theme_minimal() +
+  scale_fill_manual(values = c("OLS" = "lightblue4", "Ridge" = "lightcoral", "LASSO" = 'palegoldenrod')) 
+
+```
+We can see that the OLS estimates have much greater variance than the other two models 
+
+
