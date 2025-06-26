@@ -244,7 +244,8 @@ ggplot(team_ranking_named, aes(x = reorder(TeamName, Strength), y = Strength)) +
 # 2. Get strengths for Purdue and Connecticut
 strength_purdue <- team_ranking_named %>% filter(TeamName == "Purdue") %>% pull(Strength)
 strength_connecticut <- team_ranking_named %>% filter(TeamName == "Connecticut") %>% pull(Strength)
-
+strength_purdue
+strength_connecticut
 # 3. Calculate logit (assuming Purdue is home)
 logit_purdue_win <- strength_purdue - strength_connecticut
 
