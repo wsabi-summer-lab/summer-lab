@@ -20,33 +20,42 @@ nba_lineups <- readRDS("../data/15_nba-lineups.rds")
 head(nba_lineups)
 
 ############################
-### ONE-HOT ENCODING ###
+### ONE-HOT ENCODING FIX ###
 ############################
 
-# Get list of all players
-all_players <- unique(unlist(nba_lineups[, c("OP1", "OP2", "OP3", "OP4", "OP5", "DP1", "DP2", "DP3", "DP4", "DP5")]))
+# Split lineup strings into player IDs
+lineup_team_list <- strsplit(nba_lineups$lineup_team, ",\\s*")
+lineup_opp_list  <- strsplit(nba_lineups$lineup_opp, ",\\s*")
+
+# Get all unique players
+all_players <- sort(unique(unlist(c(lineup_team_list, lineup_opp_list))))
 m <- length(all_players)
+
+# Create index
 player_index <- setNames(seq_len(m), all_players)
 
-# Design matrix X and outcome y
+# Initialize X matrix: intercept + m offense + m defense
 n <- nrow(nba_lineups)
-X <- matrix(0, nrow = n, ncol = 1 + 2 * m)  # intercept + offensive + defensive
+X <- matrix(0, nrow = n, ncol = 1 + 2 * m)
 colnames(X) <- c("Intercept", paste0("Off_", all_players), paste0("Def_", all_players))
 
-# Fill X matrix
+# Fill in the design matrix
 for (i in 1:n) {
   X[i, "Intercept"] <- 1
-  for (p in paste0("OP", 1:5)) {
-    player <- nba_lineups[[p]][i]
-    if (!is.na(player)) X[i, paste0("Off_", player)] <- 1
+  for (player in lineup_team_list[[i]]) {
+    if (!is.na(player)) {
+      X[i, paste0("Off_", player)] <- 1
+    }
   }
-  for (p in paste0("DP", 1:5)) {
-    player <- nba_lineups[[p]][i]
-    if (!is.na(player)) X[i, paste0("Def_", player)] <- 1
+  for (player in lineup_opp_list[[i]]) {
+    if (!is.na(player)) {
+      X[i, paste0("Def_", player)] <- 1
+    }
   }
 }
 
-y <- nba_lineups$points
+# Outcome variable
+y <- nba_lineups$pts_poss
 
 ############################
 ### FIT OLS MODEL (APM) ###
@@ -75,8 +84,8 @@ player_names <- all_players
 ols_off <- ols_coefs[paste0("XOff_", player_names)]
 ols_def <- ols_coefs[paste0("XDef_", player_names)]
 
-ridge_off <- ridge_coefs[paste0("Off_", player_names)]
-ridge_def <- ridge_coefs[paste0("Def_", player_names)]
+ridge_off <- ridge_coefs[match(paste0("Off_", player_names), rownames(coef(ridge_model)))]
+ridge_def <- ridge_coefs[match(paste0("Def_", player_names), rownames(coef(ridge_model)))]
 
 # Build data frame for plotting
 coef_df <- data.frame(
@@ -86,23 +95,30 @@ coef_df <- data.frame(
   Ridge = c(ridge_off, ridge_def)
 )
 
+# Sample 25 players for plotting
+sample_players <- sample(player_names, 25)
+coef_df_sample <- coef_df %>% filter(Player %in% sample_players)
+
 # Reshape for ggplot
-coef_long <- coef_df %>% 
+coef_long <- coef_df_sample %>% 
   pivot_longer(cols = c("OLS", "Ridge"), names_to = "Model", values_to = "Coefficient")
+
+# Sort players by true offensive or defensive coefficients for better comparison
+coef_long <- coef_long %>% group_by(Type) %>% mutate(Player = fct_reorder(Player, Coefficient)) %>% ungroup()
 
 # Plot offensive and defensive impact separately
 p1 <- ggplot(filter(coef_long, Type == "Offense"),
-             aes(x = reorder(Player, Coefficient), y = Coefficient, fill = Model)) +
+             aes(x = Player, y = Coefficient, fill = Model)) +
   geom_bar(stat = "identity", position = "dodge") +
   coord_flip() +
-  labs(title = "Offensive Impact: OLS vs Ridge", y = "Coefficient", x = "Player") +
+  labs(title = "Offensive Impact (Sample of 25): OLS vs Ridge", y = "Coefficient", x = "Player") +
   theme_minimal()
 
 p2 <- ggplot(filter(coef_long, Type == "Defense"),
-             aes(x = reorder(Player, Coefficient), y = Coefficient, fill = Model)) +
+             aes(x = Player, y = Coefficient, fill = Model)) +
   geom_bar(stat = "identity", position = "dodge") +
   coord_flip() +
-  labs(title = "Defensive Impact: OLS vs Ridge", y = "Coefficient", x = "Player") +
+  labs(title = "Defensive Impact (Sample of 25): OLS vs Ridge", y = "Coefficient", x = "Player") +
   theme_minimal()
 
 # Show plots
