@@ -225,5 +225,3 @@ ggplot(beta_df, aes(x = model, y = coef, fill = model)) +
 
 ```
 We can see that the OLS estimates have much greater variance than the other two models 
-
-
