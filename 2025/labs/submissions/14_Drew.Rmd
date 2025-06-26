@@ -81,7 +81,7 @@ ggplot(team_df, aes(x = reorder(team, mean), y = mean)) +
        x = "Team",
        y = "Strength Estimate") +
   theme_minimal()
-
+team2023_samples = samples$beta
 
 
 
