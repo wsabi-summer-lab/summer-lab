@@ -1,0 +1,425 @@
+---
+title: "Lab 18 - Random Forests and XGBoost lfg"
+output: html_notebook
+---
+
+18.1.2 - Task 1 - fit win prob model using xgboost 
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+library(xgboost)
+library(splitTools)
+library(dials)
+library(PNWColors)
+library(Ckmeans.1d.dp)
+library(MLmetrics)
+```
+
+
+```{r}
+nfl_wp = read.csv('../data/18_nfl-wp.csv')
+head(nfl_wp)
+```
+
+```{r}
+test_data <- nfl_wp %>%
+  filter(season >= 2020)
+
+train_data <- nfl_wp %>%
+  filter(season < 2020)
+
+folds <- create_folds(
+  y = train_data$game_id,
+  k = 5,
+  type = "grouped",
+  invert = TRUE
+)
+
+train_labels <- train_data %>%
+  select(label_win)
+
+# get rid of extra columns
+train_data <- train_data %>%
+  dplyr::select(-season, -game_id, -label_win)
+
+str(folds)
+```
+Create grid of hyperparameters and create function to run on a row of the grid
+```{r}
+
+head(train_data)
+generate_random_grid <- function(n = 50) {
+  tibble::tibble(
+    eta = runif(n, 0.01, 0.3),
+    gamma = runif(n, 0, 5),
+    subsample = runif(n, 0.5, 1),
+    colsample_bytree = runif(n, 0.5, 1),
+    max_depth = sample(3:8, n, replace = TRUE),
+    min_child_weight = sample(1:10, n, replace = TRUE),
+    monotone_constraints = "(1, 0, -1, 1, -1, -1, -1, -1)" 
+  )
+}
+
+run_cv <- function(params, train_data, train_labels, folds) {
+  model_params <- list(
+    booster = "gbtree",
+    objective = "binary:logistic",
+    eval_metric = "logloss",
+    eta = params$eta,
+    gamma = params$gamma,
+    subsample = params$subsample,
+    colsample_bytree = params$colsample_bytree,
+    max_depth = params$max_depth,
+    min_child_weight = params$min_child_weight,
+    monotone_constraints = params$monotone_constraints
+  )
+  
+  cv <- xgboost::xgb.cv(
+    data = as.matrix(train_data),
+    label = train_labels$label,
+    params = model_params,
+    nrounds = 10000,
+    folds = folds,
+    early_stopping_rounds = 50,
+    verbose = 0
+  )
+  
+  tibble::tibble(
+    eta = params$eta,
+    gamma = params$gamma,
+    subsample = params$subsample,
+    colsample_bytree = params$colsample_bytree,
+    max_depth = params$max_depth,
+    min_child_weight = params$min_child_weight,
+    monotone_constraints = params$monotone_constraints,
+    iter = cv$best_iteration,
+    logloss = cv$evaluation_log$test_logloss_mean[cv$best_iteration]
+  )
+}
+
+```
+
+```{r}
+set.seed(12345)
+random_grid <- generate_random_grid(n = 50)
+
+# Run search
+results <- purrr::map_df(1:nrow(random_grid), function(i) {
+  run_cv(random_grid[i, ], train_data, train_labels, folds)
+})
+```
+
+```{r}
+results %>%
+  select(logloss, eta, gamma, subsample, colsample_bytree, max_depth, min_child_weight) %>%
+  pivot_longer(
+    eta:min_child_weight,
+    values_to = "value",
+    names_to = "parameter"
+  ) %>%
+  ggplot(aes(value, logloss, color = parameter)) +
+  geom_point(alpha = 0.8, show.legend = FALSE, size = 3) +
+  facet_wrap(~parameter, scales = "free_x") +
+  scale_color_manual(values = pnw_palette("Bay",6)) +
+  labs(x = NULL, y = "logloss") +
+  theme_minimal()
+```
+
+```{r}
+
+results %>%
+  dplyr::arrange(logloss) %>%
+  dplyr::select(eta, subsample, colsample_bytree, max_depth, logloss, min_child_weight, iter)
+
+best_model <- results %>%
+  dplyr::arrange(logloss) %>%
+  dplyr::slice(1)
+
+params <-
+  list(
+    booster = "gbtree",
+    objective = "binary:logistic",
+    eval_metric = c("logloss"),
+    eta = best_model$eta,
+    gamma = best_model$gamma,
+    subsample = best_model$subsample,
+    colsample_bytree = best_model$colsample_bytree,
+    max_depth = best_model$max_depth,
+    min_child_weight = best_model$min_child_weight,
+    monotone_constraints = best_model$monotone_constraints
+  )
+
+nrounds <- best_model$iter
+```
+
+Train on training set
+```{r}
+wp_model <- xgboost::xgboost(
+  params = params,
+  data = as.matrix(train_data),
+  label = train_labels$label,
+  nrounds = nrounds,
+  verbose = 2
+)
+```
+Feature importance plot
+```{r}
+importance <- xgboost::xgb.importance(
+  feature_names = colnames(wp_model),
+  model = wp_model
+)
+ggplot(importance, aes(x = reorder(Feature, Gain), y = Gain, fill = Feature)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  scale_color_manual(values = pnw_palette("Bay",8)) +
+  labs(title = "Feature Importance", x = "Feature", y = "Gain") +
+  theme_minimal(base_size = 14)
+```
+Predict on the test set
+```{r}
+preds <- stats::predict(
+  wp_model,
+  # get rid of the things not needed for prediction here
+  as.matrix(test_data %>% select(-label_win, -game_id, -season))
+) %>%
+  tibble::as_tibble() %>%
+  dplyr::rename(wp = value) %>%
+  dplyr::bind_cols(test_data)
+
+preds
+```
+
+
+```{r}
+MLmetrics::LogLoss(preds$wp, preds$label_win)
+```
+
+```{r}
+install.packages("MLmetrics")
+```
+Plot according to BB
+```{r}
+plot <- preds %>%
+  # Create BINS for wp:
+  dplyr::mutate(bin_pred_prob = round(wp / 0.05) * .05) %>%
+  dplyr::group_by(bin_pred_prob) %>%
+  # Calculate the calibration results:
+  dplyr::summarize(
+    n_plays = n(),
+    n_wins = length(which(label_win == 1)),
+    bin_actual_prob = n_wins / n_plays
+  ) %>%
+  dplyr::ungroup()
+
+ann_text <- data.frame(
+  x = c(.25, 0.75), y = c(0.75, 0.25),
+  lab = c("More times\nthan expected", "Fewer times\nthan expected")
+)
+
+plot %>%
+  ggplot() +
+  geom_point(aes(x = bin_pred_prob, y = bin_actual_prob, size = n_plays)) +
+  geom_smooth(aes(x = bin_pred_prob, y = bin_actual_prob), method = "loess") +
+  geom_abline(slope = 1, intercept = 0, color = "black", lty = 2) +
+  coord_equal() +
+  scale_x_continuous(limits = c(0, 1)) +
+  scale_y_continuous(limits = c(0, 1)) +
+  labs(
+    size = "Number of plays",
+    x = "Estimated win probability",
+    y = "Observed win probability",
+    title = "Win prob calibration plot"
+  ) +
+  geom_text(data = ann_text, aes(x = x, y = y, label = lab), size = 2) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    strip.background = element_blank(),
+    strip.text = element_text(size = 12),
+    axis.title = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 10, angle = 90),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 12),
+    legend.position = "bottom"
+  )
+
+```
+Task 2 - plot WPs
+```{r}
+#potench grid values
+yard_vals <- seq(1, 100, by = 1)
+score_vals <- c(-14, -7, 0, 7, 14)
+time_vals <- c(300, 900, 1800)
+
+# Use median row for fixed values
+fixed_row <- train_data %>%
+  summarise(across(everything(), median, na.rm = TRUE))
+
+# Expand grid on 3 variables of interest
+grid_df <- expand.grid(
+  yardline_100 = yard_vals,
+  score_differential = score_vals,
+  game_seconds_remaining = time_vals
+)
+
+# Fill in other features from fixed_row
+other_features <- setdiff(colnames(train_data), colnames(grid_df))
+
+for (f in other_features) {
+  grid_df[[f]] <- fixed_row[[f]]
+}
+
+# Now make sure columns are in the same order as training data
+grid_df <- grid_df[, colnames(train_data)]
+
+# Predict WP
+X_mat <- as.matrix(grid_df)
+grid_df$predicted_wp <- predict(wp_model, X_mat)
+
+# Plot
+ggplot(grid_df, aes(x = yardline_100, y = predicted_wp, color = as.factor(score_differential))) +
+  geom_line(size = 1.1) +
+  facet_wrap(~ game_seconds_remaining, labeller = label_both) +
+  labs(
+    title = "Partial Dependence of WP on Yard Line",
+    x = "Yard Line (100 = own end zone)",
+    y = "Predicted Win Probability",
+    color = "Score Diff"
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = pnw_palette("Bay", 5))  # Only 5 score diff values
+```
+
+```{r}
+
+  
+```
+
+Task 3: Bootstrapping
+```{r}
+B <- 50
+game_ids <- unique(nfl_wp$game_id)
+
+bootstrap_preds <- matrix(NA, nrow = nrow(nfl_wp), ncol = B)
+
+for (b in 1:B) {
+  # Sample games with replacement
+  sampled_games <- sample(game_ids, length(game_ids), replace = TRUE)
+  
+  # Get plays from those games
+  boot_sample <- nfl_wp %>% filter(game_id %in% sampled_games)
+  
+  # Fit model
+  X_boot <- as.matrix(boot_sample %>% select(-c(label_win, game_id)))  # adjust as needed
+  y_boot <- boot_sample$label_win
+  wp_model_b <- xgboost(data = X_boot, label = y_boot, nrounds = 50, objective = "binary:logistic", verbose = 0)
+  
+  # Predict on original data
+  X_original <- as.matrix(nfl_wp %>% select(-c(label_win, game_id)))
+  bootstrap_preds[, b] <- predict(wp_model_b, X_original)
+}
+```
+
+Get confidence intervals
+```{r}
+ci_df <- nfl_wp %>%
+  select(game_id, game_seconds_remaining, down, yardline_100, score_differential) %>%
+  mutate(
+    wp_mean = rowMeans(bootstrap_preds),
+    wp_lower = apply(bootstrap_preds, 1, quantile, 0.025),
+    wp_upper = apply(bootstrap_preds, 1, quantile, 0.975),
+    wp_width = wp_upper - wp_lower
+  )
+```
+
+```{r}
+library(ggplot2)
+
+# Histogram of CI widths
+ggplot(ci_df, aes(x = wp_width)) +
+  geom_histogram(bins = 50, fill = "lightcoral") +
+  labs(title = "Distribution of 95% CI Widths for WP", x = "CI Width", y = "Count")
+```
+
+```{r}
+ggplot(ci_df, aes(x = game_seconds_remaining, y = wp_width)) +
+  geom_point(alpha = 0.05, color = 'palegoldenrod') +
+  geom_smooth(method = "loess", se = FALSE, color = 'lightcoral') +
+  facet_wrap(~ down) +
+  labs(title = "CI Width by Time Remaining and Down", y = "CI Width", x = "Time Remaining (sec)")
+```
+```{r}
+score_vals <- c(-14, -7, 0, 7, 14)
+
+ci_df <- ci_df %>%
+  mutate(
+    yardline_group = cut(
+      yardline_100,
+      breaks = seq(0, 100, by = 10),
+      include.lowest = TRUE,
+      right = FALSE,  # makes [0,10), [10,20), ...
+      labels = paste(seq(0, 90, by = 10), seq(10, 100, by = 10), sep = "-")
+    )
+  ) %>% 
+  filter(score_differential %in% score_vals)
+
+ggplot(ci_df, aes(x = game_seconds_remaining, y = wp_mean, color = as.factor(score_differential), fill = as.factor(score_differential))) +
+  scale_color_manual(values = pnw_palette("Bay"))+
+  geom_ribbon(aes(ymin = wp_lower, ymax = wp_upper, fill = as.factor(score_differential)), alpha = 0.2, color = NA) +
+  facet_wrap(~ yardline_group, labeller = label_both) +
+  geom_line(alpha = 0.8) +
+  labs(
+    title = "WP vs Time Remaining (95% CI Ribbons)",
+    x = "Time Remaining (sec)",
+    y = "Win Probability",
+    color = "Score Diff",
+    fill = "Score Diff"
+  ) +
+  theme_minimal()
+```
+
+Repeat with random forest from lecture notes
+```{r}
+library(rpart)
+library(rpart.plot)
+library(dials)
+
+train_labels_vec <- as.factor(train_labels[[1]])
+
+tree <- rpart(
+  formula = train_labels_vec ~ .,
+  data = train_data,
+  method = "class",
+  parms = list(split = "gini"),
+  control = rpart.control(cp = 0.01)  # You can tune cp, minsplit, etc.
+)
+
+rpart.plot(tree)
+```
+
+```{r}
+library(caret)
+
+# Combine predictors + labels
+train_df <- train_data %>%
+  mutate(label = as.factor(train_labels[[1]]))
+
+# Define tuning grid
+grid <- expand.grid(cp = seq(0.001, 0.05, by = 0.005))
+
+# Cross-validation training
+fit <- train(
+  label ~ ., 
+  data = train_df, 
+  method = "rpart",
+  tuneGrid = grid,
+  trControl = trainControl(method = "cv", number = 5)
+)
+
+# Best model
+fit$bestTune
+rpart.plot(fit$finalModel)
+```
+
