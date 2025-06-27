@@ -1,0 +1,482 @@
+---
+title: "lab 18"
+output: html_document
+date: "2025-06-27"
+---
+
+```{r setup, include=FALSE}
+#############
+### SETUP ###
+#############
+
+# install.packages(c("ggplot2", "pdp", "ranger", "tidyverse", "vip", "xgboost"))
+library(ggplot2)
+library(pdp)
+library(ranger)
+library(tidyverse)
+library(vip)
+library(xgboost)
+library(caret)
+library(dplyr)
+
+# set seed
+set.seed(18)
+
+###########################
+### NFL WIN PROBABILITY ###
+###########################
+
+# read in data
+nfl_data = read_csv("../data/18_nfl-wp.csv")
+
+# preview data
+head(nfl_data)
+
+columns = as.data.frame(colnames(nfl_data))
+
+
+df_clean <- nfl_data %>%
+  drop_na() %>%
+  mutate(game_id = as.factor(game_id))
+
+# Define predictors and response
+X <- df_clean %>%
+  select(score_differential, game_seconds_remaining, posteam_spread,
+         posteam_timeouts_remaining, defteam_timeouts_remaining,
+         yardline_100, down, ydstogo)
+
+y <- df_clean$label_win
+
+# Convert to matrix for XGBoost
+X_matrix <- model.matrix(~ . - 1, data = X)
+
+```
+
+okee data is set up
+lets do a lil sum
+
+```{r}
+train_idx <- createDataPartition(y, p = 0.8, list = FALSE)
+
+
+X_train <- X_matrix[train_idx, ]
+y_train <- y[train_idx]
+X_val   <- X_matrix[-train_idx, ]
+y_val   <- y[-train_idx]
+
+dtrain <- xgb.DMatrix(data = X_train, label = y_train)
+dval   <- xgb.DMatrix(data = X_val, label = y_val)
+
+params <- list(
+  objective = "binary:logistic",
+  eval_metric = "logloss",
+  max_depth = 3,
+  eta = 0.1,
+  lambda = 1
+)
+
+
+watchlist <- list(train = dtrain, eval = dval)
+
+xgb_model <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 100,
+  watchlist = watchlist,
+  early_stopping_rounds = 10,
+  verbose = 0
+)
+
+
+```
+
+lets optimize them parmeters and shiii
+EXPAND THAT GRID BABY
+
+```{r}
+install.packages("Metrics") 
+library(Metrics) #ting has logloss apparently
+
+grid <- expand.grid(
+  max_depth = c(2, 3, 4),
+  eta       = c(0.01, 0.05, 0.1),
+  lambda    = c(0.5, 1, 2)
+)
+
+results <- list()
+
+for (i in 1:nrow(grid)) {
+  params <- list(
+    objective = "binary:logistic",
+    eval_metric = "logloss",
+    max_depth = grid$max_depth[i],
+    eta = grid$eta[i],
+    lambda = grid$lambda[i]
+  )
+  
+  model <- xgb.train(
+    params = params,
+    data = dtrain,
+    nrounds = 200,
+    watchlist = list(eval = dval),
+    early_stopping_rounds = 10,
+    verbose = 0
+  )
+  
+  best_iter <- model$best_iteration
+  val_preds <- predict(model, newdata = dval)
+  logloss_val <- logLoss(y_val, val_preds)
+  
+  results[[i]] <- tibble(
+    max_depth = grid$max_depth[i],
+    eta = grid$eta[i],
+    lambda = grid$lambda[i],
+    best_iter = best_iter,
+    val_logloss = logloss_val
+  )
+}
+
+# Combine results
+results_df <- bind_rows(results) %>% arrange(val_logloss)
+
+best_params <- results_df %>% dplyr::slice(1)
+
+final_model <- xgb.train(
+  params = list(
+    objective = "binary:logistic",
+    eval_metric = "logloss",
+    max_depth = best_params$max_depth,
+    eta = best_params$eta,
+    lambda = best_params$lambda
+  ),
+  data = dtrain,
+  nrounds = best_params$best_iter,
+  watchlist = list(eval = dval),
+  verbose = 0
+)
+```
+
+ok we have final model. time to draw
+
+
+```{r, echo = FALSE}
+X_matrix <- model.matrix(~ . - 1, data = X)
+
+# Partial dependence for yardline_100
+pdp_yard <- partial(final_model, pred.var = "yardline_100", train = X_matrix, grid.resolution = 20)
+
+ggplot(pdp_yard, aes(x = yardline_100, y = yhat)) +
+  geom_line(color = "darkblue") +
+  labs(
+    title = "Partial Dependence of WP on Yard Line",
+    x = "Yard Line (100 = your end zone)",
+    y = "Estimated Win Probability"
+  ) +
+  theme_minimal()
+```
+moreeee
+
+```{r, echo = FALSE}
+
+# Step 1: Get variable ranges from your actual data
+score_seq <- seq(min(df_clean$score_differential), max(df_clean$score_differential), by = 1)
+time_seq <- seq(0, 3600, by = 60)  # Full game time in seconds, 1-minute resolution
+
+
+# Step 2: Create prediction grid with just these 2 varying variables
+heat_grid <- expand.grid(
+  score_differential = score_seq,
+  game_seconds_remaining = time_seq
+)
+
+# Step 3: Add fixed values for other predictors (must match those used in training)
+# These fixed values are common-sense football values
+
+heat_grid <- heat_grid %>%
+  mutate(
+    yardline_100 = 50,                  # midfield
+    posteam_spread = 0,                 # even spread
+    posteam_timeouts_remaining = 3,     # full timeouts
+    defteam_timeouts_remaining = 3,
+    ydstogo = 10,                       # standard 1st down
+    down = factor(1, levels = c(1, 2, 3, 4))  # critical: define all levels even if only using one
+  )
+
+train_colnames <- colnames(X_matrix)
+
+# Build heat_matrix
+heat_matrix <- model.matrix(~ . - 1, data = heat_grid)
+
+# Ensure it's a matrix (some operations can make it a data frame)
+heat_matrix <- as.matrix(heat_matrix)
+
+# Align columns with training matrix
+train_colnames <- colnames(X_matrix)
+
+# Add missing columns with 0s
+missing_cols <- setdiff(train_colnames, colnames(heat_matrix))
+if (length(missing_cols) > 0) {
+  zero_matrix <- matrix(0, nrow = nrow(heat_matrix), ncol = length(missing_cols))
+  colnames(zero_matrix) <- missing_cols
+  heat_matrix <- cbind(heat_matrix, zero_matrix)
+}
+
+# Now reorder columns to match training matrix exactly
+heat_matrix <- heat_matrix[, train_colnames]
+
+# Predict win probability
+heat_grid$wp <- predict(final_model, newdata = xgb.DMatrix(heat_matrix))
+ggplot(heat_grid, aes(x = score_differential, y = game_seconds_remaining / 60, fill = wp)) +
+  geom_tile() +
+  scale_fill_viridis_c(name = "Win Probability") +
+  labs(
+    title = "Estimated Win Probability",
+    x = "Score Differential",
+    y = "Time Remaining (minutes)"
+  ) +
+  theme_minimal()
+
+```
+
+ok idk why that graph was so hard to make but we did it nbd
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE}
+yardline_values <- seq(1, 99, by = 2)                      # x-axis
+spread_values <- c(-14, -7, -3, 0, 3, 7, 14)                      # color
+time_remaining_values <- c(120, 600, 1800, 3000)           # facets (seconds)
+
+plot_grid2 <- expand.grid(
+  yardline_100 = yardline_values,
+  posteam_spread = spread_values,
+  game_seconds_remaining = time_remaining_values
+) %>%
+  mutate(
+    score_differential = 0,
+    posteam_timeouts_remaining = 3,
+    defteam_timeouts_remaining = 3,
+    down = factor(1, levels = c(1, 2, 3, 4)),
+    ydstogo = 10
+  )
+
+plot_matrix2 <- model.matrix(~ . - 1, data = plot_grid2)
+plot_matrix2 <- as.matrix(plot_matrix2)
+
+# Align columns with training matrix
+missing_cols <- setdiff(colnames(X_matrix), colnames(plot_matrix2))
+if (length(missing_cols) > 0) {
+  zero_matrix <- matrix(0, nrow = nrow(plot_matrix2), ncol = length(missing_cols))
+  colnames(zero_matrix) <- missing_cols
+  plot_matrix2 <- cbind(plot_matrix2, zero_matrix)
+}
+plot_matrix2 <- plot_matrix2[, colnames(X_matrix)]
+plot_grid2$wp <- predict(final_model, newdata = xgb.DMatrix(plot_matrix2))
+ggplot(plot_grid2, aes(x = yardline_100, y = wp, color = factor(posteam_spread))) +
+  geom_line(size = 1) +
+  facet_wrap(~ game_seconds_remaining, labeller = label_both) +
+  scale_color_brewer(palette = "RdBu", name = "Point Spread") +
+  labs(
+    title = "Win Probability vs Yard Line",
+    x = "Yard Line (100 = your end zone)",
+    y = "Estimated Win Probability"
+  ) +
+  theme_minimal()
+
+
+```
+
+
+lets strap the boots
+
+```{r}
+unique_games <- unique(df_clean$game_id)
+B <- 100                           # number of bootstrap samples
+n_games <- length(unique_games)
+boot_preds <- matrix(NA, nrow = nrow(df_clean), ncol = B)  # to store predictions
+for (b in 1:B) {
+  cat("Bootstrap iteration", b, "\n")
+  
+  # Sample game IDs with replacement
+  sampled_games <- sample(unique_games, n_games, replace = TRUE)
+  
+  # Subset df_clean to include all plays from sampled games
+  boot_df <- df_clean %>% filter(game_id %in% sampled_games)
+  
+  # Build X and y for training
+  X_boot <- boot_df %>% select(score_differential, game_seconds_remaining, posteam_spread,
+                               posteam_timeouts_remaining, defteam_timeouts_remaining,
+                               yardline_100, down, ydstogo)
+  y_boot <- boot_df$label_win
+  
+  # Model matrix for XGBoost
+  X_boot_matrix <- model.matrix(~ . - 1, data = X_boot)
+  
+  # DMatrix and training
+  dboot <- xgb.DMatrix(data = X_boot_matrix, label = y_boot)
+  
+  # Fit model with same best params as before
+  model_b <- xgb.train(
+    params = list(
+      objective = "binary:logistic",
+      eval_metric = "logloss",
+      max_depth = best_params$max_depth,
+      eta = best_params$eta,
+      lambda = best_params$lambda
+    ),
+    data = dboot,
+    nrounds = best_params$best_iter,
+    verbose = 0
+  )
+  
+  # Predict on the original full dataset
+  # Make sure model.matrix columns align with training
+  X_pred_matrix <- model.matrix(~ . - 1, data = X)
+  X_pred_matrix <- as.matrix(X_pred_matrix)
+  
+  # Align columns
+  missing_cols <- setdiff(colnames(X_boot_matrix), colnames(X_pred_matrix))
+  if (length(missing_cols) > 0) {
+    zero_matrix <- matrix(0, nrow = nrow(X_pred_matrix), ncol = length(missing_cols))
+    colnames(zero_matrix) <- missing_cols
+    X_pred_matrix <- cbind(X_pred_matrix, zero_matrix)
+  }
+  X_pred_matrix <- X_pred_matrix[, colnames(X_boot_matrix)]
+  
+  # Predict and store
+  boot_preds[, b] <- predict(model_b, newdata = xgb.DMatrix(X_pred_matrix))
+}
+
+ci_bounds <- apply(boot_preds, 1, quantile, probs = c(0.025, 0.975))
+
+# ci_bounds is a 2 x n matrix; transpose and convert to tibble for easier handling
+ci_df <- as.data.frame(t(ci_bounds))
+colnames(ci_df) <- c("ci_lower", "ci_upper")
+
+# Calculate CI widths
+ci_df$ci_width <- ci_df$ci_upper - ci_df$ci_lower
+
+analysis_df <- df_clean %>%
+  select(game_seconds_remaining, down) %>%
+  bind_cols(ci_df)
+
+summary(analysis_df$ci_width)
+
+
+ggplot(analysis_df, aes(x = ci_width)) +
+  geom_histogram(bins = 50, fill = "skyblue", color = "black") +
+  labs(title = "Distribution of 95% Confidence Interval Widths",
+       x = "CI Width",
+       y = "Count") +
+  theme_minimal()
+
+
+
+```
+
+```{r}
+analysis_df <- analysis_df %>%
+  mutate(time_bin = cut(game_seconds_remaining, breaks = seq(0, 3600, by = 360)))  # 6 min bins
+
+ggplot(analysis_df, aes(x = time_bin, y = ci_width)) +
+  geom_boxplot(fill = "lightgreen") +
+  labs(title = "CI Width by Time Remaining",
+       x = "Time Remaining (bins of 6 minutes)",
+       y = "95% CI Width") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+```{r}
+ggplot(analysis_df, aes(x = factor(down), y = ci_width)) +
+  geom_boxplot(fill = "orange") +
+  labs(title = "CI Width by Down",
+       x = "Down",
+       y = "95% CI Width") +
+  theme_minimal()
+
+```
+
+
+uncertainty varies a lot. some plays are pretty unclear i guess
+
+```{r}
+
+
+# Values to vary
+time_seq <- seq(0, 3600, by = 60)                   # time remaining (seconds)
+score_diff_values <- c(-14, -7, 0, 7, 14)           # score differential
+yardline_values <- c(10, 50, 90)                     # yardline facets
+
+plot_grid <- expand.grid(
+  game_seconds_remaining = time_seq,
+  score_differential = score_diff_values,
+  yardline_100 = yardline_values
+) %>%
+  mutate(
+    posteam_spread = 0,
+    posteam_timeouts_remaining = 3,
+    defteam_timeouts_remaining = 3,
+    down = factor(1, levels = c(1, 2, 3, 4)),
+    ydstogo = 10
+  )
+plot_matrix <- model.matrix(~ . - 1, data = plot_grid)
+plot_matrix <- as.matrix(plot_matrix)
+
+missing_cols <- setdiff(colnames(X_matrix), colnames(plot_matrix))
+if (length(missing_cols) > 0) {
+  zero_matrix <- matrix(0, nrow = nrow(plot_matrix), ncol = length(missing_cols))
+  colnames(zero_matrix) <- missing_cols
+  plot_matrix <- cbind(plot_matrix, zero_matrix)
+}
+plot_matrix <- plot_matrix[, colnames(X_matrix)]
+
+plot_grid$wp <- predict(final_model, newdata = xgb.DMatrix(plot_matrix))
+
+B <- ncol(boot_preds)  # number of bootstrap models
+
+boot_wp_mat <- matrix(NA, nrow = nrow(plot_grid), ncol = B)
+
+# Calculate mean and CI bounds on original plays
+wp_mean <- rowMeans(boot_preds)
+wp_lower <- apply(boot_preds, 1, quantile, 0.025)
+wp_upper <- apply(boot_preds, 1, quantile, 0.975)
+
+df_clean <- df_clean %>%
+  mutate(wp_mean = wp_mean,
+         wp_lower = wp_lower,
+         wp_upper = wp_upper)
+
+library(mgcv)
+
+df_clean <- df_clean %>% mutate(ci_width = wp_upper - wp_lower)
+
+# Fit GAM for uncertainty width
+gam_fit <- gam(ci_width ~ s(score_differential) + s(yardline_100) + s(game_seconds_remaining), data = df_clean)
+
+plot_grid$ci_width <- predict(gam_fit, newdata = plot_grid)
+plot_grid <- plot_grid %>%
+  mutate(
+    ci_lower = wp - ci_width / 2,
+    ci_upper = wp + ci_width / 2
+  )
+
+ggplot(plot_grid, aes(x = game_seconds_remaining / 60, y = wp, color = factor(score_differential), fill = factor(score_differential))) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2, color = NA) +
+  facet_wrap(~ yardline_100, labeller = label_both) +
+  scale_color_brewer(palette = "RdBu", name = "Score Diff") +
+  scale_fill_brewer(palette = "RdBu", name = "Score Diff") +
+  labs(
+    title = "Win Probability vs Time Remaining with Approximate 95% Confidence Intervals",
+    x = "Time Remaining (minutes)",
+    y = "Estimated Win Probability"
+  ) +
+  theme_minimal()
+
+
+
+
+
+```
+
+
+
