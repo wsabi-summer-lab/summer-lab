@@ -84,7 +84,7 @@ train_df <- x_train %>% mutate(Added_by = factor(y_train))
 test_df <- x_test %>% mutate(Added_by = factor(y_test))
 
 ############################
-# random forest (no boosting)
+# random forest
 
 rf_spec <- 
   rand_forest(
@@ -100,7 +100,7 @@ rf_prob <- predict(rf_fit, new_data = test_df, type = "prob") %>%
   setNames(paste0(".pred_", names(.)))
 
 ############################
-# random forest with boosting
+# boosting
 
 boost_spec <- 
   boost_tree(
@@ -191,7 +191,7 @@ print(rf_pred$.pred_class)
 # random forest
 rf_pred_class <- predict(rf_fit, new_data = test_df, type = "class")$.pred_class
 
-# boosted 
+# boosting 
 boost_pred_class <- predict(boost_fit, new_data = test_df, type = "class")$.pred_class
 
 # multinomial logit
