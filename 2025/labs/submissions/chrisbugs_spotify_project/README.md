@@ -1,7 +1,7 @@
 # Hello JP!
 Instructions on how to run this project are inside load.py -> here they are again:
 ## Instructions to run the project
-1) Change input path to your data file
+1) Change input path to your data file (in load.py at the top of the file called INPUT_PATH)
 2) cd data 
 3) python3 load.py
 4) cd ..
