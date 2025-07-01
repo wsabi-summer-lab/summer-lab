@@ -114,8 +114,13 @@ plotly_colorscale <- lapply(0:99, function(i) {
 
 plot_ly(
   data = results,
-  x = ~a, y = ~d, z = ~c, color = ~qL, type = "scatter3d", mode = "markers",
-  marker = list(size = 3, colorscale = plotly_colorscale, colorbar = list(title = "q*_L")),
+  x = ~a, y = ~d, z = ~c, type = "scatter3d", mode = "markers",
+  marker = list(
+    size = 3,
+    color = ~qL,  # move this here!
+    colorscale = plotly_colorscale,
+    colorbar = list(title = "q*_L")
+  ),
   showscale = TRUE
 ) %>%
   layout(
@@ -188,12 +193,18 @@ ggplot(results2, aes(x = d, y = e, fill = pC)) +
   ) +
   theme_minimal()
 ```
-
+We see that the probability of shooting center is shifted more left, meaning it covers a less area, likely because the kicker is stronger on the right side. 
 ```{r}
 plot_ly(
   data = results2,
-  x = ~a, y = ~d, z = ~c, color = ~qL, type = "scatter3d", mode = "markers",
-  marker = list(size = 3, colorscale = plotly_colorscale, colorbar = list(title = "q*_L")),
+  x = ~a, y = ~d, z = ~f,
+  type = "scatter3d", mode = "markers",
+  marker = list(
+    size = 3,
+    color = ~qL,  # move this here!
+    colorscale = plotly_colorscale,
+    colorbar = list(title = "q*_L")
+  ),
   showscale = TRUE
 ) %>%
   layout(
@@ -201,7 +212,7 @@ plot_ly(
     scene = list(
       xaxis = list(title = "a"),
       yaxis = list(title = "d"),
-      zaxis = list(title = "c")
+      zaxis = list(title = "f")
     )
   )
 ```
